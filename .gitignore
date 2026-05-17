@@ -1,2 +1,4 @@
 target/
 .vscode/
+uploads/songs/*
+src/main/resources/data.sql
