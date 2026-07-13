@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.model.AudioData;
@@ -31,6 +33,7 @@ import net.b3rt1c.music_streaming_backend.util.FilenameUtils.ParsedFilename;
 @RequiredArgsConstructor
 public class AudioController {
     private static final String SONGS_PATH = "uploads/songs/";
+    private static final Logger log = LoggerFactory.getLogger(AudioController.class);
 
     private final AudioDataService audioDataService;
     private final AudioFileService audioFileService;
@@ -73,10 +76,14 @@ public class AudioController {
                 .body("{\"message\":\"A song with this name already exists\"}");
         }
 
-        audioFileService.addAudioFile(file);
+        String contentHash = audioFileService.addAudioFileAndComputeSha256(file);
+        if (audioDataService.existsByContentHash(contentHash)) {
+            log.info("Duplicate content detected for upload '{}': sha256={}", file.getOriginalFilename(), contentHash);
+        }
 
         try {
             AudioData audioData = new AudioData(parsedFilename.name(), parsedFilename.extension(), SONGS_PATH);
+            audioData.setContentHash(contentHash);
             audioDataService.addAudioData(audioData);
         } catch (DataIntegrityViolationException exception) {
             audioFileService.deleteAudioFile(SONGS_PATH, parsedFilename.name(), parsedFilename.extension());

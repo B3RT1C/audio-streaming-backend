@@ -5,6 +5,9 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -30,6 +33,20 @@ public class AudioFileService {
         }
     }
 
+    public String addAudioFileAndComputeSha256(MultipartFile audioFile) {
+        Path destination = Path.of(rootPath + audioFile.getOriginalFilename());
+        MessageDigest digest = sha256Digest();
+
+        try (InputStream inputStream = audioFile.getInputStream();
+            DigestInputStream digestInputStream = new DigestInputStream(inputStream, digest)) {
+            Files.createDirectories(destination.getParent());
+            Files.copy(digestInputStream, destination, StandardCopyOption.REPLACE_EXISTING);
+            return toHex(digest.digest());
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to store audio file", exception);
+        }
+    }
+
     public void deleteAudioFile(String path, String name, String extension) {
         Path filePath = Path.of(path + name + "." + extension);
 
@@ -38,5 +55,22 @@ public class AudioFileService {
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to delete audio file", exception);
         }
+    }
+
+    private static MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
     }
 }

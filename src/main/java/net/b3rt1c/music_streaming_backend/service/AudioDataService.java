@@ -1,11 +1,8 @@
 package net.b3rt1c.music_streaming_backend.service;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -16,32 +13,31 @@ import net.b3rt1c.music_streaming_backend.repository.AudioDataRepository;
 @RequiredArgsConstructor
 public class AudioDataService {
     private final AudioDataRepository audioDataRepository;
-    
-    public Resource getSong() {
-        Resource songFile = new FileSystemResource(Path.of("uploads/songs/RickAstley-NeverGonnaGiveYouUp.mp3"));
-
-        return songFile;
-    }
 
     public List<AudioData> findAllAudioDatas() {
         return audioDataRepository.findAll();
     }
 
     public AudioData findAudioData(Integer id) {
-        Optional<AudioData> optAD = audioDataRepository.findById(id);
+        Optional<AudioData> audioData = audioDataRepository.findById(id);
 
-        if (optAD.isEmpty()) {
+        if (audioData.isEmpty()) {
             return null;
         }
-        return optAD.get();
+
+        return audioData.get();
+    }
+
+    public boolean existsByName(String name) {
+        return audioDataRepository.existsByName(name);
+    }
+
+    public boolean existsByContentHash(String contentHash) {
+        return audioDataRepository.existsByContentHash(contentHash);
     }
 
     public void addAudioData(AudioData audioData) {
-        try {
-            audioDataRepository.save(audioData);
-        } catch (Exception e) {
-        
-        }
+        audioDataRepository.save(audioData);
     }
 
     public void deleteAudioData(Integer id) {
