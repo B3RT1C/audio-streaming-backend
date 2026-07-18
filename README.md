@@ -34,10 +34,10 @@ Variables opcionales:
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/song` | Listar canciones |
-| GET | `/song/file?id=` | Stream con HTTP Range |
-| POST | `/song/file` | Subir MP3 |
-| DELETE | `/song?id=` | Borrar canción y fichero |
+| GET | `/audios` | Listar canciones |
+| GET | `/audios/{id}` | Stream con HTTP Range |
+| POST | `/audios` | Subir MP3 |
+| DELETE | `/audios/{id}` | Borrar canción y fichero |
 
 Detalle: [`docs/openapi.yaml`](./docs/openapi.yaml).
 
