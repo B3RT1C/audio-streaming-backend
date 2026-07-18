@@ -36,7 +36,7 @@ Variables opcionales:
 |--------|------|-------------|
 | GET | `/audios` | Listar canciones |
 | GET | `/audios/{id}` | Stream con HTTP Range |
-| POST | `/audios` | Subir MP3 |
+| POST | `/audios` | Subir MP3 (`file` + `name` opcional) |
 | DELETE | `/audios/{id}` | Borrar canción y fichero |
 
 Detalle: [`docs/openapi.yaml`](./docs/openapi.yaml).

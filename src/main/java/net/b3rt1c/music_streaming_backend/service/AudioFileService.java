@@ -22,8 +22,8 @@ public class AudioFileService {
         return new FileSystemResource(path + name + "." + extension);
     }
 
-    public long addAudioFile(MultipartFile audioFile) {
-        Path destination = Path.of(rootPath + audioFile.getOriginalFilename());
+    public long addAudioFile(MultipartFile audioFile, String name, String extension) {
+        Path destination = Path.of(rootPath + name + "." + extension);
 
         try (InputStream inputStream = audioFile.getInputStream()) {
             Files.createDirectories(destination.getParent());
@@ -33,8 +33,8 @@ public class AudioFileService {
         }
     }
 
-    public String addAudioFileAndComputeSha256(MultipartFile audioFile) {
-        Path destination = Path.of(rootPath + audioFile.getOriginalFilename());
+    public String addAudioFileAndComputeSha256(MultipartFile audioFile, String name, String extension) {
+        Path destination = Path.of(rootPath + name + "." + extension);
         MessageDigest digest = sha256Digest();
 
         try (InputStream inputStream = audioFile.getInputStream();
