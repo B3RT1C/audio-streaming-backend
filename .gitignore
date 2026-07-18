@@ -2,3 +2,4 @@ target/
 .vscode/
 uploads/songs/*
 .m2/
+.foglamp/

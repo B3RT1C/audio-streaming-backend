@@ -1,0 +1,112 @@
+openapi: 3.0.3
+info:
+  title: Music Streaming API
+  version: 0.1.0
+  description: Shared contract for the central backend and future local mini-backends.
+
+paths:
+  /song:
+    get:
+      summary: List track metadata
+      responses:
+        '200':
+          description: Track list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Track'
+    delete:
+      summary: Delete a track
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Track deleted
+        '404':
+          description: Track not found
+
+  /song/file:
+    get:
+      summary: Stream an audio file
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Full audio stream
+        '206':
+          description: Partial content for range requests
+        '404':
+          description: Track not found
+    post:
+      summary: Upload an audio file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: File uploaded
+
+  /sync/status:
+    get:
+      summary: Sync status between central and local catalogs
+      responses:
+        '200':
+          description: Pending downloads and uploads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatus'
+
+components:
+  schemas:
+    Track:
+      type: object
+      required: [id, path, name, extension]
+      properties:
+        id:
+          type: integer
+        path:
+          type: string
+        name:
+          type: string
+        extension:
+          type: string
+        contentHash:
+          type: string
+          description: SHA-256 content hash for duplicate detection
+        checksum:
+          type: string
+          description: Reserved for future sync support
+        updatedAt:
+          type: string
+          format: date-time
+          description: Reserved for future sync support
+
+    SyncStatus:
+      type: object
+      properties:
+        pendingDownloads:
+          type: array
+          items:
+            type: integer
+        pendingUploads:
+          type: array
+          items:
+            type: integer
