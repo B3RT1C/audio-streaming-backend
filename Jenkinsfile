@@ -3,7 +3,7 @@ pipeline {
   options {
     timestamps()
     buildDiscarder(logRotator(numToKeepStr: '20'))
-    timeout(time: 45, unit: 'MINUTES')
+    timeout(time: 60, unit: 'MINUTES')
   }
   environment {
     JAVA_HOME = 'C:\\Program Files\\Java\\jdk-26.0.1'
@@ -25,9 +25,13 @@ pipeline {
         archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true, allowEmptyArchive: true
       }
     }
+    stage('Integration') {
+      steps {
+        build job: 'music-streaming/integration', wait: true, propagate: true
+      }
+    }
     stage('Deploy staging') {
       steps {
-        // This job only tracks main; deploy after green build.
         build job: 'music-streaming/deploy-staging', wait: true, propagate: true
       }
     }
