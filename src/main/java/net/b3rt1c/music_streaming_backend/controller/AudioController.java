@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,7 +30,7 @@ import net.b3rt1c.music_streaming_backend.util.FilenameUtils;
 import net.b3rt1c.music_streaming_backend.util.FilenameUtils.ParsedFilename;
 
 @RestController
-@RequestMapping("/song")
+@RequestMapping("/audios")
 @RequiredArgsConstructor
 public class AudioController {
     private static final String SONGS_PATH = "uploads/songs/";
@@ -45,9 +46,9 @@ public class AudioController {
         return audioDataService.findAllAudioDatas();
     }
 
-    @GetMapping("/file")
+    @GetMapping("/{id}")
     public ResponseEntity<ResourceRegion> getAudioFile(
-            @RequestParam int id,
+            @PathVariable int id,
             @RequestHeader HttpHeaders headers) throws IOException {
         AudioData audioData = audioDataService.findAudioData(id);
 
@@ -63,7 +64,7 @@ public class AudioController {
         );
     }
 
-    @PostMapping("/file")
+    @PostMapping
     public ResponseEntity<String> uploadAudio(@RequestParam("file") MultipartFile file) {
         if (file.isEmpty() || file.getOriginalFilename() == null) {
             return ResponseEntity.badRequest().body("{\"message\":\"File is required\"}");
@@ -95,8 +96,8 @@ public class AudioController {
             .body("{\"message\":\"File received\"}");
     }
 
-    @DeleteMapping
-    public ResponseEntity<Void> deleteAudio(@RequestParam int id) {
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteAudio(@PathVariable int id) {
         AudioData audioData = audioDataService.findAudioData(id);
 
         if (audioData == null) {

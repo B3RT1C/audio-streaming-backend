@@ -1,11 +1,11 @@
 openapi: 3.0.3
 info:
-  title: Music Streaming API
+  title: Audio Streaming API
   version: 0.1.0
   description: Shared contract for the central backend and future local mini-backends.
 
 paths:
-  /song:
+  /audios:
     get:
       summary: List track metadata
       responses:
@@ -17,36 +17,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Track'
-    delete:
-      summary: Delete a track
-      parameters:
-        - in: query
-          name: id
-          required: true
-          schema:
-            type: integer
-      responses:
-        '204':
-          description: Track deleted
-        '404':
-          description: Track not found
-
-  /song/file:
-    get:
-      summary: Stream an audio file
-      parameters:
-        - in: query
-          name: id
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: Full audio stream
-        '206':
-          description: Partial content for range requests
-        '404':
-          description: Track not found
     post:
       summary: Upload an audio file
       requestBody:
@@ -62,6 +32,38 @@ paths:
       responses:
         '201':
           description: File uploaded
+        '409':
+          description: A track with this name already exists
+
+  /audios/{id}:
+    get:
+      summary: Stream an audio file
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Full audio stream
+        '206':
+          description: Partial content for range requests
+        '404':
+          description: Track not found
+    delete:
+      summary: Delete a track
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Track deleted
+        '404':
+          description: Track not found
 
   /sync/status:
     get:
