@@ -65,35 +65,58 @@ public class AudioController {
     }
 
     @PostMapping
-    public ResponseEntity<String> uploadAudio(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<String> uploadAudio(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "name", required = false) String name) {
         if (file.isEmpty() || file.getOriginalFilename() == null) {
             return ResponseEntity.badRequest().body("{\"message\":\"File is required\"}");
         }
 
         ParsedFilename parsedFilename = FilenameUtils.parse(file.getOriginalFilename());
+        String trackName = resolveTrackName(name, parsedFilename.name());
 
-        if (audioDataService.existsByName(parsedFilename.name())) {
+        if (trackName == null) {
+            return ResponseEntity.badRequest().body("{\"message\":\"A valid name is required\"}");
+        }
+
+        if (audioDataService.existsByName(trackName)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body("{\"message\":\"A song with this name already exists\"}");
         }
 
-        String contentHash = audioFileService.addAudioFileAndComputeSha256(file);
+        String contentHash = audioFileService.addAudioFileAndComputeSha256(
+            file,
+            trackName,
+            parsedFilename.extension()
+        );
         if (audioDataService.existsByContentHash(contentHash)) {
             log.info("Duplicate content detected for upload '{}': sha256={}", file.getOriginalFilename(), contentHash);
         }
 
         try {
-            AudioData audioData = new AudioData(parsedFilename.name(), parsedFilename.extension(), SONGS_PATH);
+            AudioData audioData = new AudioData(trackName, parsedFilename.extension(), SONGS_PATH);
             audioData.setContentHash(contentHash);
             audioDataService.addAudioData(audioData);
         } catch (DataIntegrityViolationException exception) {
-            audioFileService.deleteAudioFile(SONGS_PATH, parsedFilename.name(), parsedFilename.extension());
+            audioFileService.deleteAudioFile(SONGS_PATH, trackName, parsedFilename.extension());
             return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body("{\"message\":\"A song with this name already exists\"}");
         }
 
         return ResponseEntity.status(HttpStatus.CREATED)
             .body("{\"message\":\"File received\"}");
+    }
+
+    private static String resolveTrackName(String requestedName, String fallbackName) {
+        String candidate = requestedName == null || requestedName.isBlank()
+            ? fallbackName
+            : requestedName.trim();
+
+        if (candidate.isBlank() || candidate.contains("/") || candidate.contains("\\") || candidate.contains("..")) {
+            return null;
+        }
+
+        return candidate;
     }
 
     @DeleteMapping("/{id}")

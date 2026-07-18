@@ -25,13 +25,19 @@ paths:
           multipart/form-data:
             schema:
               type: object
+              required: [file]
               properties:
                 file:
                   type: string
                   format: binary
+                name:
+                  type: string
+                  description: Display name stored in the catalog (defaults to the file name without extension)
       responses:
         '201':
           description: File uploaded
+        '400':
+          description: Missing file or invalid name
         '409':
           description: A track with this name already exists
 
