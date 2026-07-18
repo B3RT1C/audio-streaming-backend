@@ -1,4 +1,5 @@
 target/
 .vscode/
 uploads/songs/*
-src/main/resources/data.sql.m2/
+.m2/
+.foglamp/

@@ -7,5 +7,6 @@ import net.b3rt1c.music_streaming_backend.model.AudioData;
 
 @Repository
 public interface AudioDataRepository extends JpaRepository<AudioData, Integer> {
-    
+    boolean existsByName(String name);
+    boolean existsByContentHash(String contentHash);
 }
