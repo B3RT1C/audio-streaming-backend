@@ -25,5 +25,11 @@ pipeline {
         archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true, allowEmptyArchive: true
       }
     }
+    stage('Deploy staging') {
+      steps {
+        // This job only tracks main; deploy after green build.
+        build job: 'music-streaming/deploy-staging', wait: true, propagate: true
+      }
+    }
   }
 }
