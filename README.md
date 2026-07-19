@@ -30,6 +30,18 @@ Variables opcionales:
 | `DB_USERNAME` | `postgres` |
 | `DB_PASSWORD` | `postgres` |
 
+### Persistencia
+
+- Esquema: **Flyway** (`src/main/resources/db/migration/`). Hibernate usa `ddl-auto=validate` (no crea ni borra tablas).
+- Los datos de usuario **no** se recrean al arrancar; cada cambio de modelo va en una migración nueva (`V2__…`, etc.).
+- Seed demo (`data.sql`): solo con profile `local`:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+Staging/CI no activan ese profile (sin seed).
+
 ## API v0.1.0
 
 | Método | Ruta | Descripción |
@@ -48,7 +60,7 @@ Detalle: [`docs/openapi.yaml`](./docs/openapi.yaml).
 ./mvnw test
 ```
 
-Los tests de contexto usan H2 (no requieren Postgres externo).
+Los tests de contexto usan H2 con `create-drop` y Flyway desactivado (no requieren Postgres externo).
 
 ## Cliente web
 
