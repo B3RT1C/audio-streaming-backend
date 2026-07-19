@@ -33,7 +33,16 @@ Variables opcionales:
 ### Persistencia
 
 - Esquema: **Flyway** (`src/main/resources/db/migration/`). Hibernate usa `ddl-auto=validate` (no crea ni borra tablas).
-- Los datos de usuario **no** se recrean al arrancar; cada cambio de modelo va en una migración nueva (`V2__…`, etc.).
+- Los datos de usuario **no** se recrean al arrancar; cada cambio de modelo va en una migración nueva.
+- Naming: `V{seq}__app_{x}_{y}_{z}_{descripcion}.sql` — `{seq}` ordena Flyway; `app_x_y_z` indica la versión de producto en la que entró el cambio.
+
+```
+V1__app_0_1_0_create_audio_data.sql   ← esquema inicial (app 0.1.0)
+V2__app_0_1_0_…                       ← otro cambio de esquema en 0.1.0
+V3__app_0_2_0_…                       ← primer cambio de esquema en 0.2.0
+```
+
+- Si renombras una migración **ya aplicada**, hay que reparar `flyway_schema_history` (o resetear la DB local). No renombres en staging/prod sin repair.
 - Seed demo (`data.sql`): solo con profile `local`:
 
 ```bash
