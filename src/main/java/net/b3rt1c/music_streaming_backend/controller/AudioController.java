@@ -2,8 +2,8 @@ package net.b3rt1c.music_streaming_backend.controller;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.core.io.support.ResourceRegion;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,6 +22,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import lombok.RequiredArgsConstructor;
+import net.b3rt1c.music_streaming_backend.dto.ApiMessage;
+import net.b3rt1c.music_streaming_backend.error.ApiException;
+import net.b3rt1c.music_streaming_backend.error.ErrorCodes;
 import net.b3rt1c.music_streaming_backend.model.AudioData;
 import net.b3rt1c.music_streaming_backend.service.AudioDataService;
 import net.b3rt1c.music_streaming_backend.service.AudioFileService;
@@ -50,61 +53,69 @@ public class AudioController {
     public ResponseEntity<ResourceRegion> getAudioFile(
             @PathVariable int id,
             @RequestHeader HttpHeaders headers) throws IOException {
-        AudioData audioData = audioDataService.findAudioData(id);
-
-        if (audioData == null) {
-            return ResponseEntity.notFound().build();
-        }
+        AudioData audioData = requireAudioData(id);
 
         return audioStreamService.streamAudioFile(
             audioData.getPath(),
-            audioData.getName(),
+            audioData.getStorageKey(),
             audioData.getExtension(),
             headers
         );
     }
 
     @PostMapping
-    public ResponseEntity<String> uploadAudio(
+    public ResponseEntity<ApiMessage> uploadAudio(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name) {
         if (file.isEmpty() || file.getOriginalFilename() == null) {
-            return ResponseEntity.badRequest().body("{\"message\":\"File is required\"}");
+            throw ApiException.badRequest(ErrorCodes.FILE_REQUIRED, "File is required");
         }
 
         ParsedFilename parsedFilename = FilenameUtils.parse(file.getOriginalFilename());
         String trackName = resolveTrackName(name, parsedFilename.name());
-
-        if (trackName == null) {
-            return ResponseEntity.badRequest().body("{\"message\":\"A valid name is required\"}");
-        }
-
-        if (audioDataService.existsByName(trackName)) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body("{\"message\":\"A song with this name already exists\"}");
-        }
+        String storageKey = UUID.randomUUID().toString();
 
         String contentHash = audioFileService.addAudioFileAndComputeSha256(
             file,
-            trackName,
+            storageKey,
             parsedFilename.extension()
         );
         if (audioDataService.existsByContentHash(contentHash)) {
             log.info("Duplicate content detected for upload '{}': sha256={}", file.getOriginalFilename(), contentHash);
         }
 
-        try {
-            AudioData audioData = new AudioData(trackName, parsedFilename.extension(), SONGS_PATH);
-            audioData.setContentHash(contentHash);
-            audioDataService.addAudioData(audioData);
-        } catch (DataIntegrityViolationException exception) {
-            audioFileService.deleteAudioFile(SONGS_PATH, trackName, parsedFilename.extension());
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body("{\"message\":\"A song with this name already exists\"}");
-        }
+        AudioData audioData = new AudioData(
+            trackName,
+            storageKey,
+            parsedFilename.extension(),
+            SONGS_PATH
+        );
+        audioData.setContentHash(contentHash);
+        audioDataService.addAudioData(audioData);
 
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body("{\"message\":\"File received\"}");
+        return ResponseEntity.status(HttpStatus.CREATED).body(new ApiMessage("File received"));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteAudio(@PathVariable int id) {
+        AudioData audioData = requireAudioData(id);
+
+        audioFileService.deleteAudioFile(
+            audioData.getPath(),
+            audioData.getStorageKey(),
+            audioData.getExtension()
+        );
+        audioDataService.deleteAudioData(id);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    private AudioData requireAudioData(int id) {
+        AudioData audioData = audioDataService.findAudioData(id);
+        if (audioData == null) {
+            throw ApiException.notFound("Audio track not found");
+        }
+        return audioData;
     }
 
     private static String resolveTrackName(String requestedName, String fallbackName) {
@@ -113,23 +124,9 @@ public class AudioController {
             : requestedName.trim();
 
         if (candidate.isBlank() || candidate.contains("/") || candidate.contains("\\") || candidate.contains("..")) {
-            return null;
+            throw ApiException.badRequest(ErrorCodes.INVALID_NAME, "A valid name is required");
         }
 
         return candidate;
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteAudio(@PathVariable int id) {
-        AudioData audioData = audioDataService.findAudioData(id);
-
-        if (audioData == null) {
-            return ResponseEntity.notFound().build();
-        }
-
-        audioFileService.deleteAudioFile(audioData.getPath(), audioData.getName(), audioData.getExtension());
-        audioDataService.deleteAudioData(id);
-
-        return ResponseEntity.noContent().build();
     }
 }

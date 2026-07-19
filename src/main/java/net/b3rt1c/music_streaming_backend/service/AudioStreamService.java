@@ -13,18 +13,22 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import net.b3rt1c.music_streaming_backend.error.ApiException;
 
 @Service
 @RequiredArgsConstructor
 public class AudioStreamService {
     private final AudioFileService audioFileService;
 
-    public ResponseEntity<ResourceRegion> streamAudioFile(String path, String name, String extension, HttpHeaders headers)
-            throws IOException {
-        Resource resource = audioFileService.getAudioFile(path, name, extension);
+    public ResponseEntity<ResourceRegion> streamAudioFile(
+            String path,
+            String storageKey,
+            String extension,
+            HttpHeaders headers) throws IOException {
+        Resource resource = audioFileService.getAudioFile(path, storageKey, extension);
 
         if (!resource.exists() || !resource.isReadable()) {
-            return ResponseEntity.notFound().build();
+            throw ApiException.notFound("Audio file not found");
         }
 
         long contentLength = resource.contentLength();
