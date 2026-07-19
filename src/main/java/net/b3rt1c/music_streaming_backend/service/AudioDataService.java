@@ -1,7 +1,6 @@
 package net.b3rt1c.music_streaming_backend.service;
 
 import java.util.List;
-import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 
@@ -19,17 +18,7 @@ public class AudioDataService {
     }
 
     public AudioData findAudioData(Integer id) {
-        Optional<AudioData> audioData = audioDataRepository.findById(id);
-
-        if (audioData.isEmpty()) {
-            return null;
-        }
-
-        return audioData.get();
-    }
-
-    public boolean existsByName(String name) {
-        return audioDataRepository.existsByName(name);
+        return audioDataRepository.findById(id).orElse(null);
     }
 
     public boolean existsByContentHash(String contentHash) {

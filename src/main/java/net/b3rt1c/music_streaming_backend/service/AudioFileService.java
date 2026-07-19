@@ -18,23 +18,12 @@ import org.springframework.web.multipart.MultipartFile;
 public class AudioFileService {
     private final String rootPath = "uploads/songs/";
 
-    public Resource getAudioFile(String path, String name, String extension) {
-        return new FileSystemResource(path + name + "." + extension);
+    public Resource getAudioFile(String path, String storageKey, String extension) {
+        return new FileSystemResource(path + storageKey + "." + extension);
     }
 
-    public long addAudioFile(MultipartFile audioFile, String name, String extension) {
-        Path destination = Path.of(rootPath + name + "." + extension);
-
-        try (InputStream inputStream = audioFile.getInputStream()) {
-            Files.createDirectories(destination.getParent());
-            return Files.copy(inputStream, destination, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException exception) {
-            throw new IllegalStateException("Failed to store audio file", exception);
-        }
-    }
-
-    public String addAudioFileAndComputeSha256(MultipartFile audioFile, String name, String extension) {
-        Path destination = Path.of(rootPath + name + "." + extension);
+    public String addAudioFileAndComputeSha256(MultipartFile audioFile, String storageKey, String extension) {
+        Path destination = Path.of(rootPath + storageKey + "." + extension);
         MessageDigest digest = sha256Digest();
 
         try (InputStream inputStream = audioFile.getInputStream();
@@ -47,8 +36,8 @@ public class AudioFileService {
         }
     }
 
-    public void deleteAudioFile(String path, String name, String extension) {
-        Path filePath = Path.of(path + name + "." + extension);
+    public void deleteAudioFile(String path, String storageKey, String extension) {
+        Path filePath = Path.of(path + storageKey + "." + extension);
 
         try {
             Files.deleteIfExists(filePath);

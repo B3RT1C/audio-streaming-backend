@@ -17,6 +17,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Track'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       summary: Upload an audio file
       requestBody:
@@ -32,14 +34,22 @@ paths:
                   format: binary
                 name:
                   type: string
-                  description: Display name stored in the catalog (defaults to the file name without extension)
+                  description: Display name in the catalog (may repeat; defaults to file name without extension)
       responses:
         '201':
           description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiMessage'
         '400':
-          description: Missing file or invalid name
-        '409':
-          description: A track with this name already exists
+          description: Missing file or invalid name/file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /audios/{id}:
     get:
@@ -56,7 +66,9 @@ paths:
         '206':
           description: Partial content for range requests
         '404':
-          description: Track not found
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       summary: Delete a track
       parameters:
@@ -69,7 +81,9 @@ paths:
         '204':
           description: Track deleted
         '404':
-          description: Track not found
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /sync/status:
     get:
@@ -83,7 +97,47 @@ paths:
                 $ref: '#/components/schemas/SyncStatus'
 
 components:
+  responses:
+    NotFound:
+      description: Track or audio file not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            message: Audio track not found
+            code: NOT_FOUND
+    InternalError:
+      description: Unexpected server or storage error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
   schemas:
+    ApiError:
+      type: object
+      required: [message, code]
+      properties:
+        message:
+          type: string
+          description: Human-readable English message
+        code:
+          type: string
+          description: Stable machine code for clients
+          enum:
+            - FILE_REQUIRED
+            - INVALID_NAME
+            - INVALID_FILE
+            - NOT_FOUND
+            - STORAGE_ERROR
+            - INTERNAL
+    ApiMessage:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
     Track:
       type: object
       required: [id, path, name, extension]
@@ -94,11 +148,12 @@ components:
           type: string
         name:
           type: string
+          description: Display title; duplicates are allowed
         extension:
           type: string
         contentHash:
           type: string
-          description: SHA-256 content hash for duplicate detection
+          description: SHA-256 content hash (informational; duplicates allowed)
         checksum:
           type: string
           description: Reserved for future sync support
