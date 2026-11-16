@@ -1,6 +1,7 @@
 package net.b3rt1c.music_streaming_backend.model;
 
 import java.io.Serializable;
+import java.time.Instant;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -9,6 +10,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,8 +26,28 @@ public class AudioData implements Serializable {
     private Integer id;
 
     @Setter
-    @Column(nullable = false)
+    @Column(nullable = false, length = 500)
     private String name;
+
+    @Setter
+    @Column(nullable = false, length = 500)
+    private String title;
+
+    @Setter
+    @Column(length = 500)
+    private String artist;
+
+    @Setter
+    @Column(length = 500)
+    private String album;
+
+    @Setter
+    @Column(name = "duration_seconds")
+    private Integer durationSeconds;
+
+    @Setter
+    @Column(name = "track_number")
+    private Integer trackNumber;
 
     @Setter
     @JsonIgnore
@@ -37,17 +59,40 @@ public class AudioData implements Serializable {
     private String extension;
 
     @Setter
-    @Column(nullable = false)
+    @Column(nullable = false, length = 4096)
     private String path;
 
     @Setter
     @Column(name = "content_hash")
     private String contentHash;
 
+    @Setter
+    @Column(name = "original_filename", length = 500)
+    private String originalFilename;
+
+    @Setter
+    @JsonIgnore
+    @Column(name = "original_path", length = 4096)
+    private String originalPath;
+
+    @Setter
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
     public AudioData(String name, String storageKey, String extension, String path) {
         this.name = name;
         this.storageKey = storageKey;
         this.extension = extension;
         this.path = path;
+    }
+
+    @PrePersist
+    void onCreate() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+        if (title == null || title.isBlank()) {
+            title = name;
+        }
     }
 }

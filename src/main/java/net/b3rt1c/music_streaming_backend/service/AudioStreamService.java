@@ -14,43 +14,63 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.error.ApiException;
+import net.b3rt1c.music_streaming_backend.error.ErrorCodes;
+import net.b3rt1c.music_streaming_backend.error.RangeNotSatisfiableException;
+import net.b3rt1c.music_streaming_backend.model.AudioData;
+import net.b3rt1c.music_streaming_backend.util.AudioFormats;
 
 @Service
 @RequiredArgsConstructor
 public class AudioStreamService {
     private final AudioFileService audioFileService;
 
-    public ResponseEntity<ResourceRegion> streamAudioFile(
-            String path,
-            String storageKey,
-            String extension,
-            HttpHeaders headers) throws IOException {
-        Resource resource = audioFileService.getAudioFile(path, storageKey, extension);
-
+    public ResponseEntity<ResourceRegion> stream(AudioData audioData, HttpHeaders headers) throws IOException {
+        Resource resource = audioFileService.getAudioFile(
+            audioData.getPath(),
+            audioData.getStorageKey(),
+            audioData.getExtension()
+        );
         if (!resource.exists() || !resource.isReadable()) {
             throw ApiException.notFound("Audio file not found");
         }
 
         long contentLength = resource.contentLength();
-        List<HttpRange> ranges = headers.getRange();
-
+        MediaType mediaType = MediaType.parseMediaType(AudioFormats.contentType(audioData.getExtension()));
+        List<HttpRange> ranges = readRanges(headers);
         if (ranges.isEmpty()) {
             return ResponseEntity.ok()
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
-                .contentType(MediaType.parseMediaType("audio/mpeg"))
+                .contentType(mediaType)
                 .contentLength(contentLength)
                 .body(new ResourceRegion(resource, 0, contentLength));
         }
 
         HttpRange range = ranges.get(0);
-        long start = range.getRangeStart(contentLength);
-        long end = range.getRangeEnd(contentLength);
-        long rangeLength = end - start + 1;
+        long start;
+        long end;
+        try {
+            start = range.getRangeStart(contentLength);
+            end = range.getRangeEnd(contentLength);
+        } catch (IllegalArgumentException exception) {
+            throw new RangeNotSatisfiableException(contentLength);
+        }
+        if (start < 0 || end < start || start >= contentLength) {
+            throw new RangeNotSatisfiableException(contentLength);
+        }
 
+        long rangeLength = end - start + 1;
         return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
             .header(HttpHeaders.ACCEPT_RANGES, "bytes")
-            .contentType(MediaType.parseMediaType("audio/mpeg"))
+            .contentType(mediaType)
             .contentLength(rangeLength)
             .body(new ResourceRegion(resource, start, rangeLength));
+    }
+
+    private static List<HttpRange> readRanges(HttpHeaders headers) {
+        try {
+            return headers.getRange();
+        } catch (IllegalArgumentException exception) {
+            throw ApiException.badRequest(ErrorCodes.INVALID_FILE, "Invalid range");
+        }
     }
 }

@@ -1,13 +1,26 @@
 openapi: 3.0.3
 info:
   title: Audio Streaming API
-  version: 0.1.0
-  description: Shared contract for the central backend and future local mini-backends.
+  version: 0.2.0
+  description: |
+    Shared contract for the personal music library.
+    There is no authentication: the service is meant to be reached only through the private network.
+    List responses stay JSON arrays. New metadata fields are added beside the 0.1.0 fields.
 
 paths:
   /audios:
     get:
-      summary: List track metadata
+      summary: List tracks, optionally filtered
+      parameters:
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+          description: >
+            Case- and accent-insensitive substring match on title, artist, album,
+            display name and original file name. Omitted or blank returns the full catalog,
+            ordered by id.
       responses:
         '200':
           description: Track list
@@ -32,9 +45,10 @@ paths:
                 file:
                   type: string
                   format: binary
+                  description: mp3, m4a, aac, flac, wav, ogg, opus or webm audio. Default limit 500 MB.
                 name:
                   type: string
-                  description: Display name in the catalog (may repeat; defaults to file name without extension)
+                  description: Display name. Defaults to the tag title, or the file name without extension.
       responses:
         '201':
           description: File uploaded
@@ -43,34 +57,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiMessage'
         '400':
-          description: Missing file or invalid name/file
+          description: Missing file, unsupported type, or invalid name
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '413':
+          description: File exceeds the configured upload limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: File exceeds the maximum upload size of 500MB
+                code: FILE_TOO_LARGE
         '500':
           $ref: '#/components/responses/InternalError'
 
   /audios/{id}:
     get:
       summary: Stream an audio file
+      description: >
+        Content-Type matches the stored extension (not always audio/mpeg).
+        A single Range is honored. A range that starts past the end of the file is 416.
       parameters:
         - in: path
           name: id
           required: true
           schema:
             type: integer
+        - in: header
+          name: Range
+          required: false
+          schema:
+            type: string
       responses:
         '200':
           description: Full audio stream
         '206':
-          description: Partial content for range requests
+          description: Partial content for the first byte range
+        '416':
+          description: Range not satisfiable. Content-Range is bytes */length.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+    patch:
+      summary: Edit track metadata
+      description: >
+        Send only the fields to change. JSON null clears artist, album, trackNumber and durationSeconds.
+        title and name cannot be cleared. Unknown fields are ignored, so the whole track object can be sent back.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackPatch'
+      responses:
+        '200':
+          description: Updated track
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Track'
+        '400':
+          description: Invalid metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
-      summary: Delete a track
+      summary: Delete a track and remove it from every playlist
       parameters:
         - in: path
           name: id
@@ -85,6 +154,206 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /playlists:
+    get:
+      summary: List playlists without their tracks
+      responses:
+        '200':
+          description: Playlist summaries. items is omitted; use GET /playlists/{id} for the tracks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Playlist'
+    post:
+      summary: Create a playlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistName'
+      responses:
+        '201':
+          description: Created playlist, with an empty items array
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Missing or invalid name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /playlists/{id}:
+    get:
+      summary: Get a playlist and its tracks in playback order
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      responses:
+        '200':
+          description: Playlist with items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Rename a playlist
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaylistName'
+      responses:
+        '200':
+          description: Updated playlist, including its items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Invalid name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a playlist
+      description: Does not delete the tracks themselves.
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      responses:
+        '204':
+          description: Playlist deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /playlists/{id}/items:
+    post:
+      summary: Append a track
+      description: >
+        Adding a track that is already in the playlist returns 200 and does not duplicate it.
+        A new track returns 201 and is placed at the end.
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audioId]
+              properties:
+                audioId:
+                  type: integer
+      responses:
+        '200':
+          description: Track was already in the playlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistItem'
+        '201':
+          description: Track appended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaylistItem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Reorder the tracks
+      description: >
+        The list must contain exactly the audio ids already in the playlist, each once.
+        Preferred body is {"audioIds":[3,1,2]}. A raw JSON array [3,1,2] is also accepted.
+        Positions are rewritten from 1 in that order.
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audioIds]
+              properties:
+                audioIds:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Playlist in the new order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: The list is not a permutation of the current tracks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /playlists/{id}/items/{audioId}:
+    delete:
+      summary: Remove a track from a playlist
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+        - in: path
+          name: audioId
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Track removed from the playlist
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/import:
+    post:
+      summary: Copy every audio file under a server folder into the library
+      description: >
+        Recursive. Reads tags. Skips a file when its original path or content hash is already stored.
+        Does not move or delete the originals. Non-audio files are ignored.
+        The path must stay inside AUDIO_IMPORT_DIR. A missing path imports that directory itself.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: Absolute path, or a path relative to AUDIO_IMPORT_DIR.
+      responses:
+        '200':
+          description: Import summary. Individual unreadable files increment failed and do not abort the run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+        '400':
+          description: Import is disabled, the path escapes the base folder, or the path is not a directory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /sync/status:
     get:
       summary: Sync status between central and local catalogs
@@ -97,9 +366,17 @@ paths:
                 $ref: '#/components/schemas/SyncStatus'
 
 components:
+  parameters:
+    PlaylistId:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+
   responses:
     NotFound:
-      description: Track or audio file not found
+      description: Track, playlist, or audio file not found
       content:
         application/json:
           schema:
@@ -127,11 +404,17 @@ components:
           description: Stable machine code for clients
           enum:
             - FILE_REQUIRED
+            - FILE_TOO_LARGE
             - INVALID_NAME
             - INVALID_FILE
+            - INVALID_BODY
+            - INVALID_ORDER
             - NOT_FOUND
             - STORAGE_ERROR
             - INTERNAL
+            - IMPORT_NOT_CONFIGURED
+            - PATH_NOT_ALLOWED
+            - RANGE_NOT_SATISFIABLE
     ApiMessage:
       type: object
       required: [message]
@@ -140,20 +423,45 @@ components:
           type: string
     Track:
       type: object
-      required: [id, path, name, extension]
+      required: [id, path, name, title, extension, createdAt]
       properties:
         id:
           type: integer
-        path:
-          type: string
         name:
           type: string
-          description: Display title; duplicates are allowed
+          description: Display name kept from 0.1.0. On upload it matches title unless name was sent.
+        title:
+          type: string
+          description: Tag title, or the file name without extension when the tag is missing
+        artist:
+          type: string
+          nullable: true
+        album:
+          type: string
+          nullable: true
+        durationSeconds:
+          type: integer
+          nullable: true
+          description: Length in seconds. Null when the file has no readable duration.
+        trackNumber:
+          type: integer
+          nullable: true
         extension:
           type: string
+        path:
+          type: string
+          description: Storage directory recorded for this file
         contentHash:
           type: string
-          description: SHA-256 content hash (informational; duplicates allowed)
+          nullable: true
+          description: SHA-256 content hash
+        originalFilename:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+          description: When the track was added to the library
         checksum:
           type: string
           description: Reserved for future sync support
@@ -161,7 +469,84 @@ components:
           type: string
           format: date-time
           description: Reserved for future sync support
-
+    TrackPatch:
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+          nullable: true
+        album:
+          type: string
+          nullable: true
+        trackNumber:
+          type: integer
+          nullable: true
+          minimum: 1
+        durationSeconds:
+          type: integer
+          nullable: true
+          minimum: 0
+    PlaylistName:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    Playlist:
+      type: object
+      required: [id, name, createdAt, updatedAt, itemCount]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        itemCount:
+          type: integer
+        items:
+          type: array
+          description: Present on a single playlist. Omitted from the list.
+          items:
+            $ref: '#/components/schemas/PlaylistItem'
+    PlaylistItem:
+      type: object
+      required: [position, audioId, audio]
+      properties:
+        position:
+          type: integer
+          description: 1-based playback order. Gaps can appear after a library track is deleted.
+        audioId:
+          type: integer
+        audio:
+          $ref: '#/components/schemas/Track'
+    ImportResult:
+      type: object
+      required: [imported, skipped, failed, ignored, errors]
+      properties:
+        imported:
+          type: integer
+        skipped:
+          type: integer
+          description: Already present by original path or content hash
+        failed:
+          type: integer
+        ignored:
+          type: integer
+          description: Files that are not in the audio whitelist
+        errors:
+          type: array
+          items:
+            type: string
+          description: Up to 100 failure messages. failed still counts every failure.
     SyncStatus:
       type: object
       properties:
