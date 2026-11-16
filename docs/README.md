@@ -1,5 +1,5 @@
 # Documentación del backend
 
-- [`openapi.yaml`](./openapi.yaml) — contrato público de la API REST.
+- [`openapi.yaml`](./openapi.yaml) — contrato público de la API REST (v0.2.0).
 
-En **v0.1.0** el único cliente es la web. Desktop y mobile consumirán este mismo contrato en el futuro. No existe un repo `shared`: el backend es la fuente de verdad del API.
+El backend es la fuente de verdad del API. La web consume este mismo contrato.

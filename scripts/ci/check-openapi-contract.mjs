@@ -1,5 +1,5 @@
 /**
- * Validates docs/openapi.yaml (v0.1 paths) against AudioController mappings.
+ * Validates docs/openapi.yaml against the controller mappings.
  * Run: node scripts/ci/check-openapi-contract.mjs
  */
 import fs from 'node:fs';
@@ -8,15 +8,25 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const openapiPath = path.join(root, 'docs', 'openapi.yaml');
-const controllerPath = path.join(
-  root,
-  'src/main/java/net/b3rt1c/music_streaming_backend/controller/AudioController.java',
-);
+const controllerDir = path.join(root, 'src/main/java/net/b3rt1c/music_streaming_backend/controller');
 
-const REQUIRED_PATHS = ['/audios', '/audios/{id}'];
+const REQUIRED_PATHS = [
+  '/audios',
+  '/audios/{id}',
+  '/playlists',
+  '/playlists/{id}',
+  '/playlists/{id}/items',
+  '/playlists/{id}/items/{audioId}',
+  '/admin/import',
+];
 const REQUIRED_METHODS = {
   '/audios': ['get', 'post'],
-  '/audios/{id}': ['get', 'delete'],
+  '/audios/{id}': ['get', 'patch', 'delete'],
+  '/playlists': ['get', 'post'],
+  '/playlists/{id}': ['get', 'patch', 'delete'],
+  '/playlists/{id}/items': ['post', 'put'],
+  '/playlists/{id}/items/{audioId}': ['delete'],
+  '/admin/import': ['post'],
 };
 
 function fail(msg) {
@@ -40,7 +50,6 @@ function extractOpenApiPaths(yaml) {
       paths[current].add(methodMatch[1]);
       continue;
     }
-    // left the paths block
     if (line.match(/^[a-zA-Z]/) || line.match(/^components:/)) {
       current = null;
     }
@@ -50,6 +59,7 @@ function extractOpenApiPaths(yaml) {
 
 const yaml = fs.readFileSync(openapiPath, 'utf8');
 if (!yaml.includes('openapi:')) fail('docs/openapi.yaml missing openapi version');
+if (!yaml.includes('version: 0.2.0')) fail('openapi version must be 0.2.0');
 
 const apiPaths = extractOpenApiPaths(yaml);
 for (const p of REQUIRED_PATHS) {
@@ -59,14 +69,31 @@ for (const p of REQUIRED_PATHS) {
   }
 }
 
-const controller = fs.readFileSync(controllerPath, 'utf8');
-if (!controller.includes('@RequestMapping("/audios")')) fail('AudioController must map /audios');
-if (!controller.includes('@GetMapping')) fail('AudioController missing @GetMapping');
-if (!controller.includes('@GetMapping("/{id}")')) fail('AudioController missing GET /{id}');
-if (!controller.includes('@PostMapping')) fail('AudioController missing @PostMapping');
-if (!controller.includes('@DeleteMapping("/{id}")')) fail('AudioController missing DELETE /{id}');
+const audio = fs.readFileSync(path.join(controllerDir, 'AudioController.java'), 'utf8');
+if (!audio.includes('@RequestMapping("/audios")')) fail('AudioController must map /audios');
+if (!audio.includes('@GetMapping')) fail('AudioController missing @GetMapping');
+if (!audio.includes('@GetMapping("/{id}")')) fail('AudioController missing GET /{id}');
+if (!audio.includes('@PostMapping')) fail('AudioController missing @PostMapping');
+if (!audio.includes('@PatchMapping("/{id}")')) fail('AudioController missing PATCH /{id}');
+if (!audio.includes('@DeleteMapping("/{id}")')) fail('AudioController missing DELETE /{id}');
 
-console.log('CONTRACT OK: openapi v0.1 paths match AudioController');
+const playlists = fs.readFileSync(path.join(controllerDir, 'PlaylistController.java'), 'utf8');
+if (!playlists.includes('@RequestMapping("/playlists")')) fail('PlaylistController must map /playlists');
+if (!playlists.includes('@PostMapping("/{id}/items")')) fail('PlaylistController missing POST items');
+if (!playlists.includes('@PutMapping("/{id}/items")')) fail('PlaylistController missing PUT items');
+if (!playlists.includes('@DeleteMapping("/{id}/items/{audioId}")')) fail('PlaylistController missing DELETE item');
+
+const importer = fs.readFileSync(path.join(controllerDir, 'ImportController.java'), 'utf8');
+if (!importer.includes('@RequestMapping("/admin")')) fail('ImportController must map /admin');
+if (!importer.includes('@PostMapping("/import")')) fail('ImportController missing POST /import');
+
+const cors = fs.readFileSync(
+  path.join(root, 'src/main/java/net/b3rt1c/music_streaming_backend/config/CorsConfig.java'),
+  'utf8',
+);
+if (cors.includes('192.168.')) fail('CORS still has a hardcoded LAN address');
+
+console.log('CONTRACT OK: openapi v0.2.0 paths match the controllers');
 for (const p of REQUIRED_PATHS) {
   console.log(`  ${p}: ${[...apiPaths[p]].sort().join(', ')}`);
 }

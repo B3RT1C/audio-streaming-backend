@@ -5,19 +5,29 @@ public final class FilenameUtils {
     private FilenameUtils() {
     }
 
+    public static String baseName(String filename) {
+        if (filename == null) {
+            return "";
+        }
+        String trimmed = filename.trim();
+        int slash = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+        return slash >= 0 ? trimmed.substring(slash + 1) : trimmed;
+    }
+
     public static ParsedFilename parse(String filename) {
-        if (filename == null || filename.isBlank()) {
+        String base = baseName(filename);
+        if (base.isBlank()) {
             throw new IllegalArgumentException("Filename is required");
         }
 
-        int lastDot = filename.lastIndexOf('.');
-        if (lastDot <= 0 || lastDot == filename.length() - 1) {
+        int lastDot = base.lastIndexOf('.');
+        if (lastDot <= 0 || lastDot == base.length() - 1) {
             throw new IllegalArgumentException("Filename must include a valid extension");
         }
 
         return new ParsedFilename(
-            filename.substring(0, lastDot),
-            filename.substring(lastDot + 1)
+            base.substring(0, lastDot),
+            base.substring(lastDot + 1)
         );
     }
 

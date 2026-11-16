@@ -2,11 +2,15 @@ package net.b3rt1c.music_streaming_backend.error;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
@@ -16,6 +20,21 @@ import net.b3rt1c.music_streaming_backend.dto.ApiError;
 public class ApiExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
+    private final String maxFileSize;
+
+    public ApiExceptionHandler(
+            @Value("${spring.servlet.multipart.max-file-size:500MB}") String maxFileSize) {
+        this.maxFileSize = maxFileSize;
+    }
+
+    @ExceptionHandler(RangeNotSatisfiableException.class)
+    public ResponseEntity<ApiError> handleRange(RangeNotSatisfiableException exception) {
+        return ResponseEntity.status(exception.getStatus())
+            .header(HttpHeaders.CONTENT_RANGE, "bytes */" + exception.getResourceLength())
+            .header(HttpHeaders.ACCEPT_RANGES, "bytes")
+            .body(new ApiError(exception.getMessage(), exception.getCode()));
+    }
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handleApiException(ApiException exception) {
         return ResponseEntity
@@ -23,15 +42,36 @@ public class ApiExceptionHandler {
             .body(new ApiError(exception.getMessage(), exception.getCode()));
     }
 
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleTooLarge(MaxUploadSizeExceededException exception) {
+        return fileTooLarge();
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ApiError> handleMultipart(MultipartException exception) {
+        if (isUploadTooLarge(exception)) {
+            return fileTooLarge();
+        }
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(new ApiError("File is required", ErrorCodes.FILE_REQUIRED));
+    }
+
     @ExceptionHandler({
         MissingServletRequestPartException.class,
-        MissingServletRequestParameterException.class,
-        MultipartException.class
+        MissingServletRequestParameterException.class
     })
     public ResponseEntity<ApiError> handleMissingUpload(Exception exception) {
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
             .body(new ApiError("File is required", ErrorCodes.FILE_REQUIRED));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadable(HttpMessageNotReadableException exception) {
+        return ResponseEntity
+            .status(HttpStatus.BAD_REQUEST)
+            .body(new ApiError("Request body is invalid", ErrorCodes.INVALID_BODY));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -55,5 +95,28 @@ public class ApiExceptionHandler {
         return ResponseEntity
             .status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(new ApiError("Unexpected server error", ErrorCodes.INTERNAL));
+    }
+
+    private ResponseEntity<ApiError> fileTooLarge() {
+        return ResponseEntity
+            .status(HttpStatus.CONTENT_TOO_LARGE)
+            .body(new ApiError(
+                "File exceeds the maximum upload size of " + maxFileSize,
+                ErrorCodes.FILE_TOO_LARGE
+            ));
+    }
+
+    private static boolean isUploadTooLarge(Throwable throwable) {
+        while (throwable != null) {
+            if (throwable instanceof MaxUploadSizeExceededException) {
+                return true;
+            }
+            String type = throwable.getClass().getName();
+            if (type.endsWith("SizeLimitExceededException") || type.endsWith("FileSizeLimitExceededException")) {
+                return true;
+            }
+            throwable = throwable.getCause();
+        }
+        return false;
     }
 }
