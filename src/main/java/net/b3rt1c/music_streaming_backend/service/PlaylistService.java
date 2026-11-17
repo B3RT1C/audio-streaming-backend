@@ -25,6 +25,7 @@ import net.b3rt1c.music_streaming_backend.repository.AudioDataRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistItemRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistRepository;
 import net.b3rt1c.music_streaming_backend.util.Names;
+import net.b3rt1c.music_streaming_backend.util.TagNames;
 
 @Service
 @RequiredArgsConstructor
@@ -32,6 +33,7 @@ public class PlaylistService {
     private final PlaylistRepository playlistRepository;
     private final PlaylistItemRepository playlistItemRepository;
     private final AudioDataRepository audioDataRepository;
+    private final TagService tagService;
 
     @Transactional(readOnly = true)
     public List<PlaylistResponse> list() {
@@ -63,10 +65,10 @@ public class PlaylistService {
 
     @Transactional
     public void delete(int id) {
-        if (!playlistRepository.existsById(id)) {
-            throw ApiException.notFound("Playlist not found");
-        }
-        playlistRepository.deleteById(id);
+        Playlist playlist = playlistRepository.findById(id)
+            .orElseThrow(() -> ApiException.notFound("Playlist not found"));
+        playlist.getTags().clear();
+        playlistRepository.delete(playlist);
     }
 
     @Transactional
@@ -146,6 +148,15 @@ public class PlaylistService {
         return detail(playlist);
     }
 
+    @Transactional
+    public PlaylistResponse replaceTags(int id, List<String> rawNames) {
+        Playlist playlist = require(id);
+        tagService.replace(playlist.getTags(), rawNames);
+        playlist.setUpdatedAt(Instant.now());
+        playlistRepository.save(playlist);
+        return detail(playlist);
+    }
+
     public record AddItemResult(boolean created, PlaylistItemResponse item) {
     }
 
@@ -169,7 +180,8 @@ public class PlaylistService {
             playlist.getCreatedAt(),
             playlist.getUpdatedAt(),
             itemCount,
-            null
+            null,
+            TagNames.sorted(playlist.getTags())
         );
     }
 
@@ -184,7 +196,8 @@ public class PlaylistService {
             playlist.getCreatedAt(),
             playlist.getUpdatedAt(),
             items.size(),
-            items
+            items,
+            TagNames.sorted(playlist.getTags())
         );
     }
 

@@ -1,6 +1,8 @@
 package net.b3rt1c.music_streaming_backend;
 
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +32,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
@@ -38,9 +41,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.jayway.jsonpath.JsonPath;
 
 import net.b3rt1c.music_streaming_backend.model.AudioData;
+import net.b3rt1c.music_streaming_backend.repository.ArtistRepository;
 import net.b3rt1c.music_streaming_backend.repository.AudioDataRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistItemRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistRepository;
+import net.b3rt1c.music_streaming_backend.repository.TagRepository;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -58,11 +63,25 @@ class AudioLibraryApiTest {
     @Autowired
     private PlaylistItemRepository playlistItemRepository;
 
+    @Autowired
+    private ArtistRepository artistRepository;
+
+    @Autowired
+    private TagRepository tagRepository;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @BeforeEach
     void reset() throws Exception {
+        jdbc.update("DELETE FROM audio_tags");
+        jdbc.update("DELETE FROM artist_tags");
+        jdbc.update("DELETE FROM playlist_tags");
         playlistItemRepository.deleteAll();
         playlistRepository.deleteAll();
         audioDataRepository.deleteAll();
+        artistRepository.deleteAll();
+        tagRepository.deleteAll();
         deleteChildren(Path.of("target/test-storage"));
         deleteChildren(Path.of("target/test-import"));
     }
@@ -159,6 +178,8 @@ class AudioLibraryApiTest {
             .andExpect(jsonPath("$[0].trackNumber").value(7))
             .andExpect(jsonPath("$[0].originalFilename").value("corazon.mp3"))
             .andExpect(jsonPath("$[0].name").value("Corazón"))
+            .andExpect(jsonPath("$[0].secondaryTitle").value(nullValue()))
+            .andExpect(jsonPath("$[0].tags").isEmpty())
             .andExpect(jsonPath("$[0].createdAt").exists());
 
         mockMvc.perform(get("/audios").param("q", "CORAZON"))
@@ -192,7 +213,9 @@ class AudioLibraryApiTest {
             .andExpect(jsonPath("$.artist").value("Banda"))
             .andExpect(jsonPath("$.album").value(nullValue()))
             .andExpect(jsonPath("$.trackNumber").value(3))
-            .andExpect(jsonPath("$.name").value("Viejo"));
+            .andExpect(jsonPath("$.name").value("Viejo"))
+            .andExpect(jsonPath("$.secondaryTitle").value(nullValue()))
+            .andExpect(jsonPath("$.tags").isEmpty());
 
         mockMvc.perform(patch("/audios/" + id)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -216,6 +239,7 @@ class AudioLibraryApiTest {
             .andExpect(jsonPath("$.name").value("Noche"))
             .andExpect(jsonPath("$.itemCount").value(0))
             .andExpect(jsonPath("$.items").isArray())
+            .andExpect(jsonPath("$.tags").isEmpty())
             .andReturn().getResponse().getContentAsString();
         int playlistId = JsonPath.read(created, "$.id");
 
@@ -223,7 +247,8 @@ class AudioLibraryApiTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].id").value(playlistId))
             .andExpect(jsonPath("$[0].itemCount").value(0))
-            .andExpect(jsonPath("$[0].items").doesNotExist());
+            .andExpect(jsonPath("$[0].items").doesNotExist())
+            .andExpect(jsonPath("$[0].tags").isEmpty());
 
         mockMvc.perform(patch("/playlists/" + playlistId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -380,6 +405,281 @@ class AudioLibraryApiTest {
             .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, containsString("PATCH")))
             .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, containsString("PUT")))
             .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, containsString("DELETE")));
+    }
+
+    @Test
+    void secondaryTitleIsEditableAndSearchable() throws Exception {
+        int id = saveTrack("Viejo", "Viejo título", "Ana", "Disco", "viejo.mp3");
+        int other = saveTrack("Otro", "Otro", "Luis", "Disco", "otro.mp3");
+
+        mockMvc.perform(patch("/audios/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"secondaryTitle\":\"  Traducción  \"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.secondaryTitle").value("Traducción"))
+            .andExpect(jsonPath("$.title").value("Viejo título"))
+            .andExpect(jsonPath("$.artist").value("Ana"))
+            .andExpect(jsonPath("$.tags").isEmpty());
+
+        mockMvc.perform(get("/audios").param("q", "traduccion"))
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].id").value(id));
+        mockMvc.perform(get("/audios").param("q", "TRADUCCION"))
+            .andExpect(jsonPath("$[0].id").value(id));
+
+        mockMvc.perform(patch("/audios/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"secondaryTitle\":\"  \"}"))
+            .andExpect(jsonPath("$.secondaryTitle").value(nullValue()));
+        mockMvc.perform(patch("/audios/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"secondaryTitle\":null}"))
+            .andExpect(jsonPath("$.secondaryTitle").value(nullValue()));
+        mockMvc.perform(get("/audios").param("q", "traduccion"))
+            .andExpect(jsonPath("$").isEmpty());
+
+        mockMvc.perform(patch("/audios/" + other)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_NAME"));
+    }
+
+    @Test
+    void tagsFilterTracksAndStayOnTheResponses() throws Exception {
+        int first = saveTrack("Uno", "Uno", "Ana", "Disco", "uno.mp3");
+        int second = saveTrack("Dos", "Dos", "Luis", "Disco", "dos.mp3");
+
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\" En Vivo \",\"en vivo\",\"Rock\"]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(first))
+            .andExpect(jsonPath("$.artist").value("Ana"))
+            .andExpect(jsonPath("$.tags", contains("En Vivo", "Rock")));
+
+        mockMvc.perform(get("/audios"))
+            .andExpect(jsonPath("$", hasSize(2)));
+        mockMvc.perform(get("/audios").param("tag", "EN VIVO"))
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].id").value(first))
+            .andExpect(jsonPath("$[0].tags", contains("En Vivo", "Rock")));
+        mockMvc.perform(get("/audios").param("tag", "en vivo").param("q", "uno"))
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].id").value(first));
+        mockMvc.perform(get("/audios").param("tag", "en vivo").param("q", "dos"))
+            .andExpect(jsonPath("$").isEmpty());
+        mockMvc.perform(get("/audios").param("tag", "vivo"))
+            .andExpect(jsonPath("$").isEmpty());
+        mockMvc.perform(get("/audios").param("tag", "   "))
+            .andExpect(jsonPath("$", hasSize(2)));
+
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"  ROCK \",\"Jazz\"]}"))
+            .andExpect(jsonPath("$.tags", contains("Jazz", "Rock")));
+
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[]}"))
+            .andExpect(jsonPath("$.tags").isEmpty());
+        mockMvc.perform(get("/tags"))
+            .andExpect(jsonPath("$", hasSize(3)))
+            .andExpect(jsonPath("$[0].name").value("En Vivo"))
+            .andExpect(jsonPath("$[0].audioCount").value(0))
+            .andExpect(jsonPath("$[1].name").value("Jazz"))
+            .andExpect(jsonPath("$[1].audioCount").value(0))
+            .andExpect(jsonPath("$[2].name").value("Rock"))
+            .andExpect(jsonPath("$[2].audioCount").value(0));
+
+        mockMvc.perform(put("/audios/" + second + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"Rock\"]}"))
+            .andExpect(status().isOk());
+        mockMvc.perform(delete("/audios/" + second))
+            .andExpect(status().isNoContent());
+        mockMvc.perform(get("/tags"))
+            .andExpect(jsonPath("$[2].name").value("Rock"))
+            .andExpect(jsonPath("$[2].audioCount").value(0));
+        mockMvc.perform(get("/audios/" + second))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(put("/audios/999999/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"Rock\"]}"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":\"Rock\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_BODY"));
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_BODY"));
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"   \"]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_NAME"));
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"" + "x".repeat(101) + "\"]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_NAME"));
+
+        StringBuilder tooMany = new StringBuilder("{\"tags\":[");
+        for (int i = 0; i < 101; i++) {
+            if (i > 0) {
+                tooMany.append(',');
+            }
+            tooMany.append("\"t").append(i).append('"');
+        }
+        tooMany.append("]}");
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(tooMany.toString()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("INVALID_BODY"));
+    }
+
+    @Test
+    void artistsAndPlaylistsShareTagsWithoutChangingTrackText() throws Exception {
+        int first = saveTrack("Uno", "Uno", "Ana", "Disco", "uno.mp3");
+        int second = saveTrack("Dos", "Dos", "ana", "Disco", "dos.mp3");
+
+        mockMvc.perform(patch("/audios/" + first)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"artist\":\"Ana\"}"))
+            .andExpect(jsonPath("$.artist").value("Ana"));
+        mockMvc.perform(patch("/audios/" + second)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"artist\":\"ana\"}"))
+            .andExpect(jsonPath("$.artist").value("ana"));
+
+        mockMvc.perform(get("/artists"))
+            .andExpect(jsonPath("$", hasSize(2)))
+            .andExpect(jsonPath("$[0].name").value("Ana"))
+            .andExpect(jsonPath("$[0].audioCount").value(1))
+            .andExpect(jsonPath("$[0].tags").isEmpty())
+            .andExpect(jsonPath("$[1].name").value("ana"))
+            .andExpect(jsonPath("$[1].audioCount").value(1));
+
+        int ana = artistId("Ana");
+        mockMvc.perform(put("/artists/" + ana + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"Live\"]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.name").value("Ana"))
+            .andExpect(jsonPath("$.audioCount").value(1))
+            .andExpect(jsonPath("$.tags", contains("Live")));
+        mockMvc.perform(get("/audios").param("q", "uno"))
+            .andExpect(jsonPath("$[0].artist").value("Ana"));
+
+        String created = mockMvc.perform(post("/playlists")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Noche\"}"))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+        int playlistId = JsonPath.read(created, "$.id");
+        mockMvc.perform(post("/playlists/" + playlistId + "/items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"audioId\":" + first + "}"))
+            .andExpect(status().isCreated());
+        mockMvc.perform(put("/audios/" + first + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"Live\"]}"))
+            .andExpect(status().isOk());
+        mockMvc.perform(put("/playlists/" + playlistId + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[\"LIVE\"]}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.tags", contains("Live")))
+            .andExpect(jsonPath("$.items[0].audio.tags", contains("Live")))
+            .andExpect(jsonPath("$.items[0].audio.artist").value("Ana"));
+
+        mockMvc.perform(get("/playlists"))
+            .andExpect(jsonPath("$[0].tags", contains("Live")))
+            .andExpect(jsonPath("$[0].items").doesNotExist());
+        mockMvc.perform(get("/tags"))
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].name").value("Live"))
+            .andExpect(jsonPath("$[0].audioCount").value(1))
+            .andExpect(jsonPath("$[0].artistCount").value(1))
+            .andExpect(jsonPath("$[0].playlistCount").value(1));
+
+        mockMvc.perform(patch("/audios/" + first)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"artist\":null}"))
+            .andExpect(jsonPath("$.artist").value(nullValue()));
+        mockMvc.perform(get("/artists"))
+            .andExpect(jsonPath("$[0].name").value("Ana"))
+            .andExpect(jsonPath("$[0].audioCount").value(0))
+            .andExpect(jsonPath("$[0].tags", contains("Live")))
+            .andExpect(jsonPath("$[1].audioCount").value(1));
+
+        mockMvc.perform(put("/artists/999999/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[]}"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        mockMvc.perform(put("/playlists/999999/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tags\":[]}"))
+            .andExpect(status().isNotFound());
+
+        mockMvc.perform(delete("/playlists/" + playlistId))
+            .andExpect(status().isNoContent());
+        mockMvc.perform(get("/tags"))
+            .andExpect(jsonPath("$[0].name").value("Live"))
+            .andExpect(jsonPath("$[0].playlistCount").value(0))
+            .andExpect(jsonPath("$[0].audioCount").value(1))
+            .andExpect(jsonPath("$[0].artistCount").value(1));
+    }
+
+    @Test
+    void uploadAndImportRegisterArtistsFromTags() throws Exception {
+        byte[] tagged = Mp3Fixture.withTags("Corazón", "José", "Álbum", "1");
+        mockMvc.perform(multipart("/audios")
+                .file(new MockMultipartFile("file", "corazon.mp3", "audio/mpeg", tagged)))
+            .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/artists"))
+            .andExpect(jsonPath("$", hasSize(1)))
+            .andExpect(jsonPath("$[0].name").value("José"))
+            .andExpect(jsonPath("$[0].audioCount").value(1));
+
+        Path folder = Path.of("target/test-import/tagged");
+        Files.createDirectories(folder);
+        Files.write(folder.resolve("otra.mp3"), Mp3Fixture.withTags("Otra", "José", "Álbum", "2"));
+        Files.write(folder.resolve("sola.mp3"), Mp3Fixture.withTags("Sola", "Banda", "Álbum", "3"));
+        mockMvc.perform(post("/admin/import")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"path\":\"tagged\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.imported").value(2));
+
+        mockMvc.perform(get("/artists"))
+            .andExpect(jsonPath("$", hasSize(2)))
+            .andExpect(jsonPath("$[0].name").value("Banda"))
+            .andExpect(jsonPath("$[0].audioCount").value(1))
+            .andExpect(jsonPath("$[1].name").value("José"))
+            .andExpect(jsonPath("$[1].audioCount").value(2));
+        mockMvc.perform(get("/audios").param("q", "otra.mp3"))
+            .andExpect(jsonPath("$[0].artist").value("José"))
+            .andExpect(jsonPath("$[0].title").value("Otra"));
+    }
+
+    private int artistId(String name) throws Exception {
+        String body = mockMvc.perform(get("/artists"))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+        net.minidev.json.JSONArray ids = JsonPath.read(body, "$[?(@.name == '" + name + "')].id");
+        return ((Number) ids.get(0)).intValue();
     }
 
     private int saveTrack(String name, String title, String artist, String album, String filename) {

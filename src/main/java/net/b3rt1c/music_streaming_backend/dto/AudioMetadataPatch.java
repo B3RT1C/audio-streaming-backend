@@ -7,12 +7,15 @@ import net.b3rt1c.music_streaming_backend.error.ErrorCodes;
 
 /**
  * Partial update. A missing field is left unchanged; JSON null clears optional metadata.
+ * secondaryTitle follows the same rules as artist and album.
  */
 public record AudioMetadataPatch(
     boolean nameSet,
     String name,
     boolean titleSet,
     String title,
+    boolean secondaryTitleSet,
+    String secondaryTitle,
     boolean artistSet,
     String artist,
     boolean albumSet,
@@ -34,6 +37,8 @@ public record AudioMetadataPatch(
             text(body, "name", false),
             body.has("title"),
             text(body, "title", false),
+            body.has("secondaryTitle"),
+            text(body, "secondaryTitle", true),
             body.has("artist"),
             text(body, "artist", true),
             body.has("album"),

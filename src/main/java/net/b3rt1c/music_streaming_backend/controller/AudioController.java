@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.dto.ApiMessage;
 import net.b3rt1c.music_streaming_backend.dto.AudioMetadataPatch;
 import net.b3rt1c.music_streaming_backend.dto.AudioResponse;
+import net.b3rt1c.music_streaming_backend.dto.TagAssignment;
 import net.b3rt1c.music_streaming_backend.model.AudioData;
 import net.b3rt1c.music_streaming_backend.service.AudioDataService;
 import net.b3rt1c.music_streaming_backend.service.AudioFileService;
@@ -40,8 +42,10 @@ public class AudioController {
     private final AudioStreamService audioStreamService;
 
     @GetMapping
-    public List<AudioResponse> getAllAudiosInfo(@RequestParam(value = "q", required = false) String query) {
-        return audioDataService.search(query).stream()
+    public List<AudioResponse> getAllAudiosInfo(
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "tag", required = false) String tag) {
+        return audioDataService.search(query, tag).stream()
             .map(AudioResponse::from)
             .toList();
     }
@@ -64,6 +68,11 @@ public class AudioController {
     @PatchMapping("/{id}")
     public AudioResponse updateMetadata(@PathVariable int id, @RequestBody JsonNode body) {
         return AudioResponse.from(audioDataService.updateMetadata(id, AudioMetadataPatch.parse(body)));
+    }
+
+    @PutMapping("/{id}/tags")
+    public AudioResponse replaceTags(@PathVariable int id, @RequestBody JsonNode body) {
+        return AudioResponse.from(audioDataService.replaceTags(id, TagAssignment.parse(body)));
     }
 
     @DeleteMapping("/{id}")
