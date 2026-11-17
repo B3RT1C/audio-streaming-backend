@@ -29,7 +29,9 @@ import net.b3rt1c.music_streaming_backend.model.AudioData;
 import net.b3rt1c.music_streaming_backend.service.AudioDataService;
 import net.b3rt1c.music_streaming_backend.service.AudioFileService;
 import net.b3rt1c.music_streaming_backend.service.AudioIngestService;
+import net.b3rt1c.music_streaming_backend.service.AudioQuery;
 import net.b3rt1c.music_streaming_backend.service.AudioStreamService;
+import net.b3rt1c.music_streaming_backend.util.SearchParams;
 import tools.jackson.databind.JsonNode;
 
 @RestController
@@ -44,8 +46,24 @@ public class AudioController {
     @GetMapping
     public List<AudioResponse> getAllAudiosInfo(
             @RequestParam(value = "q", required = false) String query,
-            @RequestParam(value = "tag", required = false) String tag) {
-        return audioDataService.search(query, tag).stream()
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "artist", required = false) String artist,
+            @RequestParam(value = "tag", required = false) List<String> tags,
+            @RequestParam(value = "artistTag", required = false) List<String> artistTags,
+            @RequestParam(value = "playlistTag", required = false) List<String> playlistTags,
+            @RequestParam(value = "shuffle", required = false) String shuffle,
+            @RequestParam(value = "seed", required = false) String seed) {
+        boolean random = SearchParams.shuffle(shuffle);
+        return audioDataService.search(new AudioQuery(
+            query,
+            title,
+            artist,
+            tags,
+            artistTags,
+            playlistTags,
+            random,
+            SearchParams.seed(seed, random)
+        )).stream()
             .map(AudioResponse::from)
             .toList();
     }

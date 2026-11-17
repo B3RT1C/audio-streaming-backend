@@ -69,7 +69,10 @@ function extractOpenApiPaths(yaml) {
 
 const yaml = fs.readFileSync(openapiPath, 'utf8');
 if (!yaml.includes('openapi:')) fail('docs/openapi.yaml missing openapi version');
-if (!yaml.includes('version: 0.3.0')) fail('openapi version must be 0.3.0');
+if (!yaml.includes('version: 0.4.0')) fail('openapi version must be 0.4.0');
+for (const name of ['title', 'artist', 'artistTag', 'playlistTag', 'shuffle', 'seed']) {
+  if (!yaml.includes(`name: ${name}`)) fail(`openapi missing query param ${name}`);
+}
 
 const apiPaths = extractOpenApiPaths(yaml);
 for (const p of REQUIRED_PATHS) {
@@ -87,6 +90,9 @@ if (!audio.includes('@PostMapping')) fail('AudioController missing @PostMapping'
 if (!audio.includes('@PatchMapping("/{id}")')) fail('AudioController missing PATCH /{id}');
 if (!audio.includes('@DeleteMapping("/{id}")')) fail('AudioController missing DELETE /{id}');
 if (!audio.includes('@PutMapping("/{id}/tags")')) fail('AudioController missing PUT /{id}/tags');
+for (const name of ['title', 'artist', 'artistTag', 'playlistTag', 'shuffle', 'seed']) {
+  if (!audio.includes(`"${name}"`)) fail(`AudioController missing query param ${name}`);
+}
 
 const patch = fs.readFileSync(
   path.join(root, 'src/main/java/net/b3rt1c/music_streaming_backend/dto/AudioMetadataPatch.java'),
@@ -100,6 +106,9 @@ if (!playlists.includes('@PostMapping("/{id}/items")')) fail('PlaylistController
 if (!playlists.includes('@PutMapping("/{id}/items")')) fail('PlaylistController missing PUT items');
 if (!playlists.includes('@DeleteMapping("/{id}/items/{audioId}")')) fail('PlaylistController missing DELETE item');
 if (!playlists.includes('@PutMapping("/{id}/tags")')) fail('PlaylistController missing PUT tags');
+if (!playlists.includes('"q"') || !playlists.includes('"tag"')) {
+  fail('PlaylistController list must accept q and tag');
+}
 
 const tags = fs.readFileSync(path.join(controllerDir, 'TagController.java'), 'utf8');
 if (!tags.includes('@RequestMapping("/tags")')) fail('TagController must map /tags');
@@ -109,6 +118,9 @@ const artists = fs.readFileSync(path.join(controllerDir, 'ArtistController.java'
 if (!artists.includes('@RequestMapping("/artists")')) fail('ArtistController must map /artists');
 if (!artists.includes('@GetMapping')) fail('ArtistController missing GET');
 if (!artists.includes('@PutMapping("/{id}/tags")')) fail('ArtistController missing PUT tags');
+if (!artists.includes('"q"') || !artists.includes('"tag"')) {
+  fail('ArtistController list must accept q and tag');
+}
 
 const importer = fs.readFileSync(path.join(controllerDir, 'ImportController.java'), 'utf8');
 if (!importer.includes('@RequestMapping("/admin")')) fail('ImportController must map /admin');
@@ -120,7 +132,7 @@ const cors = fs.readFileSync(
 );
 if (cors.includes('192.168.')) fail('CORS still has a hardcoded LAN address');
 
-console.log('CONTRACT OK: openapi v0.3.0 paths match the controllers');
+console.log('CONTRACT OK: openapi v0.4.0 paths match the controllers');
 for (const p of REQUIRED_PATHS) {
   console.log(`  ${p}: ${[...apiPaths[p]].sort().join(', ')}`);
 }

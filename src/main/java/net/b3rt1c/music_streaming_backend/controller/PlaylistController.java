@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
@@ -34,8 +35,10 @@ public class PlaylistController {
     private final PlaylistService playlistService;
 
     @GetMapping
-    public List<PlaylistResponse> list() {
-        return playlistService.list();
+    public List<PlaylistResponse> list(
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "tag", required = false) List<String> tags) {
+        return playlistService.list(query, tags);
     }
 
     @PostMapping

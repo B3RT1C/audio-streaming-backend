@@ -17,4 +17,7 @@ public interface PlaylistRepository extends JpaRepository<Playlist, Integer> {
 
     @Query("select t.id, count(p) from Playlist p join p.tags t group by t.id")
     List<Object[]> countByTag();
+
+    @Query("select p.id, t.nameKey from Playlist p join p.tags t")
+    List<Object[]> findIdAndTagKey();
 }

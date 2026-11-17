@@ -6,6 +6,7 @@ public final class ErrorCodes {
     public static final String INVALID_NAME = "INVALID_NAME";
     public static final String INVALID_FILE = "INVALID_FILE";
     public static final String INVALID_BODY = "INVALID_BODY";
+    public static final String INVALID_QUERY = "INVALID_QUERY";
     public static final String INVALID_ORDER = "INVALID_ORDER";
     public static final String NOT_FOUND = "NOT_FOUND";
     public static final String STORAGE_ERROR = "STORAGE_ERROR";

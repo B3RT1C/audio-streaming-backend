@@ -12,4 +12,7 @@ public interface PlaylistItemRepository extends JpaRepository<PlaylistItem, Inte
 
     @Query("select i.playlist.id, count(i) from PlaylistItem i group by i.playlist.id")
     List<Object[]> countByPlaylist();
+
+    @Query("select i.playlist.id, i.audio.id from PlaylistItem i")
+    List<Object[]> findPlaylistAndAudioIds();
 }
