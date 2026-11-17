@@ -1,14 +1,19 @@
 openapi: 3.0.3
 info:
   title: Audio Streaming API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Shared contract for the personal music library.
     There is no authentication: the service is meant to be reached only through the private network.
     List responses stay JSON arrays. New fields are added beside the previous ones.
+    There is no paging: filters and shuffle apply to the whole list.
 
     0.3.0 adds secondaryTitle on tracks, an artist catalog copied from track artist text,
     and tags on tracks, artists and playlists.
+
+    0.4.0 adds field filters on tracks, playlists and artists. Filters combine with AND.
+    A blank parameter is ignored. A value that matches nothing returns an empty list, not an error.
+    GET /audios can also shuffle the filtered list. One tag and q keep the 0.3.0 behaviour.
 
 paths:
   /audios:
@@ -23,24 +28,104 @@ paths:
           description: >
             Case- and accent-insensitive substring match on title, secondaryTitle, artist,
             album, display name and original file name. Omitted or blank does not filter.
-            Combined with tag, a track must match both. Results stay ordered by id.
+            AND-combined with title, artist, tag, artistTag and playlistTag.
+            Without shuffle, results stay ordered by id.
         - in: query
-          name: tag
+          name: title
           required: false
           schema:
             type: string
           description: >
-            Exact tag name, case-insensitive and accent-sensitive ("jose" does not match "José").
-            Not a substring. Omitted or blank does not filter. An unknown name returns an empty list.
+            Case- and accent-insensitive substring of title or secondaryTitle.
+            Does not match artist, album, display name or file name; those stay on q.
+            Omitted or blank does not filter.
+        - in: query
+          name: artist
+          required: false
+          schema:
+            type: string
+          description: >
+            Case- and accent-insensitive substring of the track artist text (audios.artist).
+            Does not match title, album or the artist catalog beyond that stored text.
+            A track with no artist does not match. Omitted or blank does not filter.
+        - in: query
+          name: tag
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: >
+            Repeat the parameter (?tag=a&tag=b) so the track must have every tag.
+            One value keeps the 0.3.0 rule: exact name, case-insensitive and accent-sensitive
+            ("jose" does not match "José"). Not a substring. Blank entries are ignored.
+            An unknown name returns an empty list.
+        - in: query
+          name: artistTag
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: >
+            Repeat so the track is kept only when the artist row whose name equals
+            audios.artist exactly ("Ana" and "ana" are different) has every listed tag.
+            Same tag name rules as tag. A track with no artist, or whose artist text has
+            no row, does not match. Blank entries are ignored. Unknown names return an empty list.
+        - in: query
+          name: playlistTag
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: >
+            Repeat so the track must belong to at least one playlist that has every listed tag.
+            Tags split across different playlists do not count. Same tag name rules as tag.
+            Blank entries are ignored. Unknown names return an empty list.
+        - in: query
+          name: shuffle
+          required: false
+          schema:
+            type: string
+          description: >
+            When true (any case), the filtered list is returned in random order.
+            Omitted, blank or false keeps id order. Any other value is 400 INVALID_QUERY.
+        - in: query
+          name: seed
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: >
+            Optional integer seed, used only when shuffle=true.
+            The same seed and the same filtered set (in id order before the mix) return the same order,
+            so a client can repeat the mix. A blank seed is ignored and the mix is not repeatable.
+            A non-integer seed is 400 INVALID_QUERY only when shuffle=true; otherwise seed is ignored.
       responses:
         '200':
-          description: Track list
+          description: Track list. A JSON array, not a page.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Track'
+        '400':
+          description: shuffle is not true or false, or seed is not an integer while shuffle=true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: seed must be an integer
+                code: INVALID_QUERY
         '500':
           $ref: '#/components/responses/InternalError'
     post:
@@ -240,6 +325,30 @@ paths:
         Clearing a track's artist does not delete the artist row.
         There is no POST /artists. Ordered case-insensitively by name, then by the exact name.
         audioCount is the number of tracks whose artist text equals name.
+        q is a case- and accent-insensitive substring of the artist name.
+        tag may be repeated (?tag=a&tag=b); the artist must have every tag.
+        Tag names follow the track rule (case-insensitive, accent-sensitive, not a substring).
+        Blank q or tag values are ignored. Unknown names return an empty list.
+        Filters do not change the order of the artists that remain.
+      parameters:
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+          description: Case- and accent-insensitive substring of the artist name. Blank does not filter.
+        - in: query
+          name: tag
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: >
+            Repeat so the artist must have every tag. Same name rules as GET /audios tag.
+            Blank entries are ignored. An unknown name returns an empty list.
       responses:
         '200':
           description: Artist catalog
@@ -299,6 +408,29 @@ paths:
   /playlists:
     get:
       summary: List playlists without their tracks
+      description: >
+        Ordered by id. q is a case- and accent-insensitive substring of the playlist name.
+        tag may be repeated; the playlist must have every tag, with the same name rules as GET /audios.
+        Blank values are ignored. Unknown names return an empty list. items stays omitted.
+      parameters:
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+          description: Case- and accent-insensitive substring of the playlist name. Blank does not filter.
+        - in: query
+          name: tag
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: >
+            Repeat so the playlist must have every tag. Same name rules as GET /audios tag.
+            Blank entries are ignored. An unknown name returns an empty list.
       responses:
         '200':
           description: Playlist summaries. items is omitted; use GET /playlists/{id} for the tracks.
@@ -580,6 +712,7 @@ components:
             - INVALID_NAME
             - INVALID_FILE
             - INVALID_BODY
+            - INVALID_QUERY
             - INVALID_ORDER
             - NOT_FOUND
             - STORAGE_ERROR

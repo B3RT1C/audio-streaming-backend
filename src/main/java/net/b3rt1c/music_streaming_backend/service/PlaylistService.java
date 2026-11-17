@@ -25,7 +25,9 @@ import net.b3rt1c.music_streaming_backend.repository.AudioDataRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistItemRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistRepository;
 import net.b3rt1c.music_streaming_backend.util.Names;
+import net.b3rt1c.music_streaming_backend.util.SearchParams;
 import net.b3rt1c.music_streaming_backend.util.TagNames;
+import net.b3rt1c.music_streaming_backend.util.TextFold;
 
 @Service
 @RequiredArgsConstructor
@@ -36,9 +38,16 @@ public class PlaylistService {
     private final TagService tagService;
 
     @Transactional(readOnly = true)
-    public List<PlaylistResponse> list() {
+    public List<PlaylistResponse> list(String query, List<String> tags) {
+        String needle = SearchParams.needle(query);
+        Set<String> tagKeys = SearchParams.tagKeys(tags);
+        if (!tagService.allExist(tagKeys)) {
+            return List.of();
+        }
         Map<Integer, Integer> counts = itemCounts();
         return playlistRepository.findAll(Sort.by("id")).stream()
+            .filter(playlist -> needle.isEmpty() || TextFold.fold(playlist.getName()).contains(needle))
+            .filter(playlist -> SearchParams.hasEveryTag(playlist.getTags(), tagKeys))
             .map(playlist -> summary(playlist, counts.getOrDefault(playlist.getId(), 0)))
             .toList();
     }

@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,7 +16,9 @@ import net.b3rt1c.music_streaming_backend.error.ApiException;
 import net.b3rt1c.music_streaming_backend.model.Artist;
 import net.b3rt1c.music_streaming_backend.repository.ArtistRepository;
 import net.b3rt1c.music_streaming_backend.repository.AudioDataRepository;
+import net.b3rt1c.music_streaming_backend.util.SearchParams;
 import net.b3rt1c.music_streaming_backend.util.TagNames;
+import net.b3rt1c.music_streaming_backend.util.TextFold;
 
 @Service
 @RequiredArgsConstructor
@@ -38,7 +41,12 @@ public class ArtistService {
     }
 
     @Transactional(readOnly = true)
-    public List<ArtistResponse> list() {
+    public List<ArtistResponse> list(String query, List<String> tags) {
+        String needle = SearchParams.needle(query);
+        Set<String> tagKeys = SearchParams.tagKeys(tags);
+        if (!tagService.allExist(tagKeys)) {
+            return List.of();
+        }
         Map<String, Integer> counts = new HashMap<>();
         for (Object[] row : audioDataRepository.countGroupedByArtist()) {
             counts.put((String) row[0], ((Number) row[1]).intValue());
@@ -48,6 +56,8 @@ public class ArtistService {
             unique.putIfAbsent(artist.getId(), artist);
         }
         return unique.values().stream()
+            .filter(artist -> needle.isEmpty() || TextFold.fold(artist.getName()).contains(needle))
+            .filter(artist -> SearchParams.hasEveryTag(artist.getTags(), tagKeys))
             .sorted(Comparator.comparing((Artist artist) -> TagNames.key(artist.getName()))
                 .thenComparing(Artist::getName))
             .map(artist -> ArtistResponse.from(artist, counts.getOrDefault(artist.getName(), 0)))

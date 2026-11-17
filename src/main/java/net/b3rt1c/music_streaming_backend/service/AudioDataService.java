@@ -1,9 +1,12 @@
 package net.b3rt1c.music_streaming_backend.service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,11 +15,12 @@ import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.dto.AudioMetadataPatch;
 import net.b3rt1c.music_streaming_backend.error.ApiException;
 import net.b3rt1c.music_streaming_backend.model.AudioData;
-import net.b3rt1c.music_streaming_backend.model.Tag;
+import net.b3rt1c.music_streaming_backend.repository.ArtistRepository;
 import net.b3rt1c.music_streaming_backend.repository.AudioDataRepository;
 import net.b3rt1c.music_streaming_backend.repository.PlaylistItemRepository;
+import net.b3rt1c.music_streaming_backend.repository.PlaylistRepository;
 import net.b3rt1c.music_streaming_backend.util.Names;
-import net.b3rt1c.music_streaming_backend.util.TagNames;
+import net.b3rt1c.music_streaming_backend.util.SearchParams;
 import net.b3rt1c.music_streaming_backend.util.TextFold;
 
 @Service
@@ -26,23 +30,52 @@ public class AudioDataService {
 
     private final AudioDataRepository audioDataRepository;
     private final PlaylistItemRepository playlistItemRepository;
+    private final PlaylistRepository playlistRepository;
+    private final ArtistRepository artistRepository;
     private final TagService tagService;
     private final ArtistService artistService;
 
     @Transactional(readOnly = true)
-    public List<AudioData> search(String query, String tag) {
-        List<AudioData> audios = distinctInOrder(audioDataRepository.findAllWithTags());
-        String needle = query == null ? "" : TextFold.fold(query.trim());
-        String tagKey = tag == null ? "" : TagNames.key(tag);
-        boolean filterQuery = !needle.isBlank();
-        boolean filterTag = tag != null && !tag.isBlank() && !tagKey.isBlank();
-        if (!filterQuery && !filterTag) {
-            return audios;
+    public List<AudioData> search(AudioQuery query) {
+        String text = SearchParams.needle(query.text());
+        String title = SearchParams.needle(query.title());
+        String artist = SearchParams.needle(query.artist());
+        Set<String> tags = SearchParams.tagKeys(query.tags());
+        Set<String> artistTags = SearchParams.tagKeys(query.artistTags());
+        Set<String> playlistTags = SearchParams.tagKeys(query.playlistTags());
+
+        if (!tagService.allExist(tags) || !tagService.allExist(artistTags) || !tagService.allExist(playlistTags)) {
+            return List.of();
         }
-        return audios.stream()
-            .filter(audio -> !filterQuery || matches(audio, needle))
-            .filter(audio -> !filterTag || hasTag(audio, tagKey))
+
+        Set<String> artistNames = artistTags.isEmpty() ? null : artistNamesWithAllTags(artistTags);
+        if (artistNames != null && artistNames.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> playlistAudioIds = playlistTags.isEmpty() ? null : audioIdsInPlaylistsWithAllTags(playlistTags);
+        if (playlistAudioIds != null && playlistAudioIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<AudioData> audios = distinctInOrder(audioDataRepository.findAllWithTags());
+        boolean unrestricted = text.isEmpty()
+            && title.isEmpty()
+            && artist.isEmpty()
+            && tags.isEmpty()
+            && artistNames == null
+            && playlistAudioIds == null;
+        List<AudioData> filtered = unrestricted ? audios : audios.stream()
+            .filter(audio -> text.isEmpty() || matchesQuery(audio, text))
+            .filter(audio -> title.isEmpty() || matchesTitle(audio, title))
+            .filter(audio -> artist.isEmpty() || contains(audio.getArtist(), artist))
+            .filter(audio -> SearchParams.hasEveryTag(audio.getTags(), tags))
+            .filter(audio -> artistNames == null || artistNames.contains(audio.getArtist()))
+            .filter(audio -> playlistAudioIds == null || playlistAudioIds.contains(audio.getId()))
             .toList();
+        if (!query.shuffle()) {
+            return filtered;
+        }
+        return SearchParams.shuffled(filtered, query.seed());
     }
 
     public AudioData require(int id) {
@@ -117,7 +150,49 @@ public class AudioDataService {
         return new ArrayList<>(unique.values());
     }
 
-    private static boolean matches(AudioData audio, String needle) {
+    private Set<String> artistNamesWithAllTags(Set<String> required) {
+        Map<String, Set<String>> tagsByName = new HashMap<>();
+        for (Object[] row : artistRepository.findNameAndTagKey()) {
+            String name = (String) row[0];
+            String key = (String) row[1];
+            tagsByName.computeIfAbsent(name, ignored -> new HashSet<>()).add(key);
+        }
+        Set<String> names = new HashSet<>();
+        for (Map.Entry<String, Set<String>> entry : tagsByName.entrySet()) {
+            if (entry.getValue().containsAll(required)) {
+                names.add(entry.getKey());
+            }
+        }
+        return names;
+    }
+
+    private Set<Integer> audioIdsInPlaylistsWithAllTags(Set<String> required) {
+        Map<Integer, Set<String>> tagsByPlaylist = new HashMap<>();
+        for (Object[] row : playlistRepository.findIdAndTagKey()) {
+            int playlistId = ((Number) row[0]).intValue();
+            String key = (String) row[1];
+            tagsByPlaylist.computeIfAbsent(playlistId, ignored -> new HashSet<>()).add(key);
+        }
+        Set<Integer> playlistIds = new HashSet<>();
+        for (Map.Entry<Integer, Set<String>> entry : tagsByPlaylist.entrySet()) {
+            if (entry.getValue().containsAll(required)) {
+                playlistIds.add(entry.getKey());
+            }
+        }
+        if (playlistIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<Integer> audioIds = new HashSet<>();
+        for (Object[] row : playlistItemRepository.findPlaylistAndAudioIds()) {
+            int playlistId = ((Number) row[0]).intValue();
+            if (playlistIds.contains(playlistId)) {
+                audioIds.add(((Number) row[1]).intValue());
+            }
+        }
+        return audioIds;
+    }
+
+    private static boolean matchesQuery(AudioData audio, String needle) {
         return contains(audio.getTitle(), needle)
             || contains(audio.getSecondaryTitle(), needle)
             || contains(audio.getArtist(), needle)
@@ -126,13 +201,8 @@ public class AudioDataService {
             || contains(audio.getOriginalFilename(), needle);
     }
 
-    private static boolean hasTag(AudioData audio, String tagKey) {
-        for (Tag tag : audio.getTags()) {
-            if (tagKey.equals(tag.getNameKey())) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean matchesTitle(AudioData audio, String needle) {
+        return contains(audio.getTitle(), needle) || contains(audio.getSecondaryTitle(), needle);
     }
 
     private static boolean contains(String value, String needle) {

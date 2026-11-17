@@ -13,6 +13,9 @@ public interface ArtistRepository extends JpaRepository<Artist, Integer> {
     @Query("select distinct a from Artist a left join fetch a.tags")
     List<Artist> findAllWithTags();
 
+    @Query("select a.name, t.nameKey from Artist a join a.tags t")
+    List<Object[]> findNameAndTagKey();
+
     @Query("select t.id, count(a) from Artist a join a.tags t group by t.id")
     List<Object[]> countByTag();
 }

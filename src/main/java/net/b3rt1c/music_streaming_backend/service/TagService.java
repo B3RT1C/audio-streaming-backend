@@ -32,6 +32,14 @@ public class TagService {
     private final PlaylistRepository playlistRepository;
 
     @Transactional(readOnly = true)
+    public boolean allExist(Set<String> nameKeys) {
+        if (nameKeys == null || nameKeys.isEmpty()) {
+            return true;
+        }
+        return tagRepository.findByNameKeyIn(nameKeys).size() >= nameKeys.size();
+    }
+
+    @Transactional(readOnly = true)
     public List<TagResponse> list() {
         Map<Integer, Integer> audios = counts(audioDataRepository.countByTag());
         Map<Integer, Integer> artists = counts(artistRepository.countByTag());
