@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Audio Streaming API
-  version: 0.4.1
+  version: 0.5.0
   description: |
     Shared contract for the personal music library.
     There is no authentication: the service is meant to be reached only through the private network.
@@ -20,6 +20,13 @@ info:
     genre, album and year are derived from the track and are read-only. artist is not stored as a
     tag. language is assigned by hand. GET /audios accepts repeatable f tokens that AND with the
     0.4.0 filters. GET /filter/suggest autocompletes every type, including artists and playlists.
+
+    0.5.0 records listens and exposes instance-wide stats. There is no user id yet; a nullable
+    user column can be added later without rewriting play_events. from and to are inclusive
+    YYYY-MM-DD dates in Europe/Madrid (STATS_ZONE). Omitting a bound leaves that side open over
+    the whole history. plays count only events with counted=true. listenedSeconds sums every
+    event in the window, including ones that did not count. Rankings use the current catalog
+    names and the tags the track has now.
 
 paths:
   /audios:
@@ -901,6 +908,195 @@ paths:
                   value: Rock
                   count: 120
 
+  /plays:
+    post:
+      summary: Record a listen
+      description: >
+        201 with the stored event. A repeated clientEventId returns 200 and the original event;
+        the new body is ignored. Blank clientEventId is stored as null, so blanks do not collide.
+        Surrounding whitespace is trimmed. listenedSeconds is capped at durationSeconds + 5
+        (STATS_LISTENED_SLACK_SECONDS) when the duration is known, and counted is computed from
+        that stored value. counted is true when stored seconds reach
+        min(STATS_MIN_COUNTED_SECONDS, durationSeconds * STATS_COUNTED_DURATION_RATIO)
+        (defaults 30 and 0.5). Unknown duration uses the minimum alone. The ratio is a real
+        number, so a threshold of 15.5 needs 16 seconds. Duration 0 counts any non-negative listen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlayEventRequest'
+      responses:
+        '201':
+          description: Listen stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayEvent'
+        '200':
+          description: clientEventId already existed. The stored event is returned unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayEvent'
+        '400':
+          description: >
+            Unknown audio, unknown playlist, missing or negative listenedSeconds,
+            source outside the allowed list, or a body that cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: Audio not found
+                code: INVALID_BODY
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /plays/{id}:
+    delete:
+      summary: Delete one listen
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Event deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /stats/summary:
+    get:
+      summary: Listening totals for a date window
+      parameters:
+        - $ref: '#/components/parameters/StatsFrom'
+        - $ref: '#/components/parameters/StatsTo'
+      responses:
+        '200':
+          description: >
+            plays and distinct counts use counted events only.
+            listenedSeconds sums every event in the window.
+            from and to echo the query and are null when omitted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsSummary'
+        '400':
+          description: from or to is not YYYY-MM-DD, or from is after to
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: from must be a date (YYYY-MM-DD)
+                code: INVALID_QUERY
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /stats/top:
+    get:
+      summary: Rank tracks, artists, tags or playlists
+      parameters:
+        - in: query
+          name: kind
+          required: true
+          schema:
+            type: string
+            enum: [audio, artist, tag, playlist]
+          description: Case-insensitive. audio uses the track title. artist uses the artists table.
+        - $ref: '#/components/parameters/StatsFrom'
+        - $ref: '#/components/parameters/StatsTo'
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+          description: Positive integer. Default 20. There is no maximum.
+        - in: query
+          name: tagType
+          required: false
+          schema:
+            type: string
+          description: >
+            Type key, used only when kind=tag (genre, not Género). An unknown key returns an empty list.
+            Ignored for other kinds. Blank is ignored.
+      responses:
+        '200':
+          description: >
+            JSON array ordered by plays descending, then listenedSeconds descending, then id ascending.
+            A row is included only when it has at least one counted play.
+            plays counts those events. listenedSeconds sums every event in the window for that row.
+            One listen is attributed in full to every tag the track currently has.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatsRank'
+        '400':
+          description: kind is missing or unknown, or limit is not a positive integer, or the date window is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: kind must be audio, artist, tag or playlist
+                code: INVALID_QUERY
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /stats/timeline:
+    get:
+      summary: Listening series with empty periods filled
+      parameters:
+        - in: query
+          name: granularity
+          required: true
+          schema:
+            type: string
+            enum: [day, month, year]
+          description: Case-insensitive. Buckets use STATS_ZONE (Europe/Madrid by default), not UTC.
+        - $ref: '#/components/parameters/StatsFrom'
+        - $ref: '#/components/parameters/StatsTo'
+      responses:
+        '200':
+          description: >
+            Chronological array. period is YYYY-MM-DD, YYYY-MM or YYYY.
+            plays counts counted events. listenedSeconds sums every event.
+            A closed from/to range is filled with zeros even when it has no events.
+            An open end is anchored by the first or last event; if nothing anchors it, the array is empty.
+            With neither bound, the series runs from the first event to the last, or is empty.
+            2026-01-15T23:30:00Z falls on 2026-01-16 in Europe/Madrid.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StatsTimelinePoint'
+              example:
+                - period: '2026-01-15'
+                  plays: 1
+                  listenedSeconds: 40
+                - period: '2026-01-16'
+                  plays: 1
+                  listenedSeconds: 40
+                - period: '2026-01-17'
+                  plays: 0
+                  listenedSeconds: 0
+        '400':
+          description: granularity is missing or unknown, or the date window is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: granularity must be day, month or year
+                code: INVALID_QUERY
+        '500':
+          $ref: '#/components/responses/InternalError'
   /sync/status:
     get:
       summary: Sync status between central and local catalogs
@@ -920,10 +1116,33 @@ components:
       required: true
       schema:
         type: integer
+    StatsFrom:
+      in: query
+      name: from
+      required: false
+      schema:
+        type: string
+        format: date
+        example: '2026-01-15'
+      description: >
+        Inclusive calendar date (YYYY-MM-DD) in STATS_ZONE, default Europe/Madrid.
+        Omitted means the start of the history. Blank is treated as omitted.
+    StatsTo:
+      in: query
+      name: to
+      required: false
+      schema:
+        type: string
+        format: date
+        example: '2026-01-31'
+      description: >
+        Inclusive calendar date (YYYY-MM-DD) in STATS_ZONE.
+        Omitted means the end of the history. Blank is treated as omitted.
+        A value before from is 400 INVALID_QUERY.
 
   responses:
     NotFound:
-      description: Track, playlist, artist, or audio file not found
+      description: Track, playlist, artist, audio file, or play event not found
       content:
         application/json:
           schema:
@@ -1265,6 +1484,142 @@ components:
           items:
             type: string
           description: Up to 100 failure messages. failed still counts every failure.
+    PlayEventRequest:
+      type: object
+      required: [audioId, listenedSeconds]
+      properties:
+        audioId:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+          description: ISO-8601 instant. Omitted means now.
+        listenedSeconds:
+          type: integer
+          minimum: 0
+          description: Seconds actually heard. Capped when the track duration is known.
+        completed:
+          type: boolean
+          description: Omitted means false.
+        source:
+          type: string
+          nullable: true
+          enum: [library, search, playlist, artist, shuffle, other]
+          description: Case-insensitive. Stored in lowercase. Omitted or blank is null.
+        playlistId:
+          type: integer
+          nullable: true
+          description: Optional. Unknown id is 400. Deleting the playlist sets this back to null.
+        clientEventId:
+          type: string
+          nullable: true
+          description: Idempotency key. Trimmed. Blank is null. Unique when present.
+    PlayEvent:
+      type: object
+      required:
+        - id
+        - audioId
+        - startedAt
+        - listenedSeconds
+        - completed
+        - counted
+        - source
+        - playlistId
+        - clientEventId
+        - createdAt
+      properties:
+        id:
+          type: integer
+        audioId:
+          type: integer
+        startedAt:
+          type: string
+          format: date-time
+        listenedSeconds:
+          type: integer
+          minimum: 0
+        completed:
+          type: boolean
+        counted:
+          type: boolean
+          description: True when the stored listen reached the configured threshold.
+        source:
+          type: string
+          nullable: true
+          enum: [library, search, playlist, artist, shuffle, other]
+        playlistId:
+          type: integer
+          nullable: true
+        clientEventId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    StatsSummary:
+      type: object
+      required: [plays, listenedSeconds, distinctAudios, distinctArtists, from, to]
+      properties:
+        plays:
+          type: integer
+          format: int64
+          description: Events with counted=true.
+        listenedSeconds:
+          type: integer
+          format: int64
+          description: Sum of listenedSeconds for every event in the window.
+        distinctAudios:
+          type: integer
+          format: int64
+          description: Distinct tracks among counted events.
+        distinctArtists:
+          type: integer
+          format: int64
+          description: >
+            Distinct artists rows whose name equals the track artist exactly, among counted events.
+            A counted play with no matching artists row is not included.
+        from:
+          type: string
+          format: date
+          nullable: true
+        to:
+          type: string
+          format: date
+          nullable: true
+    StatsRank:
+      type: object
+      required: [id, name, plays, listenedSeconds]
+      properties:
+        id:
+          type: integer
+          description: Track, artist, tag or playlist id, depending on kind.
+        name:
+          type: string
+          description: Current title, artist name, tag name or playlist name.
+        secondaryName:
+          type: string
+          description: >
+            Track artist, or the tag type's visible name (Género, Álbum, Año, Libre).
+            Omitted for artists, playlists, and tracks with no artist.
+        plays:
+          type: integer
+          format: int64
+        listenedSeconds:
+          type: integer
+          format: int64
+    StatsTimelinePoint:
+      type: object
+      required: [period, plays, listenedSeconds]
+      properties:
+        period:
+          type: string
+          description: YYYY-MM-DD, YYYY-MM or YYYY in STATS_ZONE.
+        plays:
+          type: integer
+          format: int64
+        listenedSeconds:
+          type: integer
+          format: int64
     SyncStatus:
       type: object
       properties:
