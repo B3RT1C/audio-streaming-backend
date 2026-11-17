@@ -51,6 +51,7 @@ public class AudioController {
             @RequestParam(value = "tag", required = false) List<String> tags,
             @RequestParam(value = "artistTag", required = false) List<String> artistTags,
             @RequestParam(value = "playlistTag", required = false) List<String> playlistTags,
+            @RequestParam(value = "f", required = false) List<String> filters,
             @RequestParam(value = "shuffle", required = false) String shuffle,
             @RequestParam(value = "seed", required = false) String seed) {
         boolean random = SearchParams.shuffle(shuffle);
@@ -61,6 +62,7 @@ public class AudioController {
             tags,
             artistTags,
             playlistTags,
+            filters,
             random,
             SearchParams.seed(seed, random)
         )).stream()

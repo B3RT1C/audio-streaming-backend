@@ -53,6 +53,18 @@ public class AudioData implements Serializable {
     private String album;
 
     @Setter
+    @Column(length = 500)
+    private String genre;
+
+    /**
+     * Quoted because {@code year} is reserved by H2, which the tests use.
+     * PostgreSQL stores the same column as {@code year}.
+     */
+    @Setter
+    @Column(name = "`year`")
+    private Integer year;
+
+    @Setter
     @Column(name = "duration_seconds")
     private Integer durationSeconds;
 

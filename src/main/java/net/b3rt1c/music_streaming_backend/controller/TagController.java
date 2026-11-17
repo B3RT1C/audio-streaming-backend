@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
@@ -17,7 +18,7 @@ public class TagController {
     private final TagService tagService;
 
     @GetMapping
-    public List<TagResponse> list() {
-        return tagService.list();
+    public List<TagResponse> list(@RequestParam(value = "type", required = false) String type) {
+        return tagService.list(type);
     }
 }

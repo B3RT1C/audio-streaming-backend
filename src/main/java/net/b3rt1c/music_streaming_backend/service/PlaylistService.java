@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.dto.AudioResponse;
 import net.b3rt1c.music_streaming_backend.dto.PlaylistItemResponse;
+import net.b3rt1c.music_streaming_backend.dto.TagRequest;
 import net.b3rt1c.music_streaming_backend.dto.PlaylistResponse;
 import net.b3rt1c.music_streaming_backend.error.ApiException;
 import net.b3rt1c.music_streaming_backend.error.ErrorCodes;
@@ -158,7 +159,7 @@ public class PlaylistService {
     }
 
     @Transactional
-    public PlaylistResponse replaceTags(int id, List<String> rawNames) {
+    public PlaylistResponse replaceTags(int id, List<TagRequest> rawNames) {
         Playlist playlist = require(id);
         tagService.replace(playlist.getTags(), rawNames);
         playlist.setUpdatedAt(Instant.now());

@@ -179,7 +179,7 @@ class AudioLibraryApiTest {
             .andExpect(jsonPath("$[0].originalFilename").value("corazon.mp3"))
             .andExpect(jsonPath("$[0].name").value("Corazón"))
             .andExpect(jsonPath("$[0].secondaryTitle").value(nullValue()))
-            .andExpect(jsonPath("$[0].tags").isEmpty())
+            .andExpect(jsonPath("$[0].tags", contains("Álbum")))
             .andExpect(jsonPath("$[0].createdAt").exists());
 
         mockMvc.perform(get("/audios").param("q", "CORAZON"))

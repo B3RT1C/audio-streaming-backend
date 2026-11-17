@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.dto.AudioMetadataPatch;
+import net.b3rt1c.music_streaming_backend.dto.TagRequest;
 import net.b3rt1c.music_streaming_backend.error.ApiException;
 import net.b3rt1c.music_streaming_backend.model.AudioData;
 import net.b3rt1c.music_streaming_backend.repository.ArtistRepository;
@@ -34,6 +35,8 @@ public class AudioDataService {
     private final ArtistRepository artistRepository;
     private final TagService tagService;
     private final ArtistService artistService;
+    private final SystemTagService systemTagService;
+    private final LibraryFilterService libraryFilterService;
 
     @Transactional(readOnly = true)
     public List<AudioData> search(AudioQuery query) {
@@ -43,6 +46,7 @@ public class AudioDataService {
         Set<String> tags = SearchParams.tagKeys(query.tags());
         Set<String> artistTags = SearchParams.tagKeys(query.artistTags());
         Set<String> playlistTags = SearchParams.tagKeys(query.playlistTags());
+        List<FilterClause> filters = libraryFilterService.parse(query.filters());
 
         if (!tagService.allExist(tags) || !tagService.allExist(artistTags) || !tagService.allExist(playlistTags)) {
             return List.of();
@@ -58,12 +62,16 @@ public class AudioDataService {
         }
 
         List<AudioData> audios = distinctInOrder(audioDataRepository.findAllWithTags());
+        Map<Integer, Set<String>> playlistFolds = filters.isEmpty()
+            ? Map.of()
+            : libraryFilterService.playlistFoldsByAudio();
         boolean unrestricted = text.isEmpty()
             && title.isEmpty()
             && artist.isEmpty()
             && tags.isEmpty()
             && artistNames == null
-            && playlistAudioIds == null;
+            && playlistAudioIds == null
+            && filters.isEmpty();
         List<AudioData> filtered = unrestricted ? audios : audios.stream()
             .filter(audio -> text.isEmpty() || matchesQuery(audio, text))
             .filter(audio -> title.isEmpty() || matchesTitle(audio, title))
@@ -71,6 +79,7 @@ public class AudioDataService {
             .filter(audio -> SearchParams.hasEveryTag(audio.getTags(), tags))
             .filter(audio -> artistNames == null || artistNames.contains(audio.getArtist()))
             .filter(audio -> playlistAudioIds == null || playlistAudioIds.contains(audio.getId()))
+            .filter(audio -> libraryFilterService.matchesAll(audio, filters, playlistFolds))
             .toList();
         if (!query.shuffle()) {
             return filtered;
@@ -94,6 +103,7 @@ public class AudioDataService {
     @Transactional
     public AudioData save(AudioData audioData) {
         artistService.ensure(audioData.getArtist());
+        systemTagService.syncDerived(audioData);
         return audioDataRepository.saveAndFlush(audioData);
     }
 
@@ -115,6 +125,7 @@ public class AudioDataService {
         }
         if (patch.albumSet()) {
             audio.setAlbum(Names.optional(patch.album(), MAX_TEXT));
+            systemTagService.syncDerived(audio);
         }
         if (patch.trackNumberSet()) {
             audio.setTrackNumber(patch.trackNumber());
@@ -127,7 +138,7 @@ public class AudioDataService {
     }
 
     @Transactional
-    public AudioData replaceTags(int id, List<String> rawNames) {
+    public AudioData replaceTags(int id, List<TagRequest> rawNames) {
         AudioData audio = require(id);
         tagService.replace(audio.getTags(), rawNames);
         return audioDataRepository.save(audio);

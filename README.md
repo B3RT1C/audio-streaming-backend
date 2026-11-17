@@ -5,7 +5,7 @@ API central del ecosistema [audio-streaming](https://github.com/B3RT1C/audio-str
 - Repo: https://github.com/B3RT1C/audio-streaming-backend
 - Stack: Java 25, Spring Boot, PostgreSQL
 - Contrato: [`docs/openapi.yaml`](./docs/openapi.yaml)
-- Versión: **0.4.0**
+- Versión: **0.4.1**
 
 No hay login. El servicio está pensado para usarse solo dentro de la red privada.
 
@@ -55,9 +55,12 @@ AUDIO_IMPORT_DIR=D:\musica
 V1__app_0_1_0_create_audio_data.sql
 V2__app_0_2_0_library_metadata_and_playlists.sql
 V3__app_0_3_0_secondary_title_artists_and_tags.sql
+V4__app_0_4_1_typed_tags.sql
 ```
 
-0.4.0 no añade migración. Los filtros reutilizan el plegado de texto de `q` (sin `unaccent` ni `pg_trgm`) y los índices de etiquetas de V3. Con 7–9 mil canciones el listado sigue siendo una lectura de la biblioteca; no se reescriben títulos, artistas ni datos importados.
+0.4.0 no añade migración. Los filtros de esa versión reutilizan el plegado de texto de `q` (sin `unaccent` ni `pg_trgm`).
+
+`V4` añade `tag_types` y mueve las etiquetas que ya existían al tipo de sistema `free`. No reescribe `title`, `secondary_title`, `artist`, `album` ni `name`. Añade `genre` y `year` (la columna va entre comillas porque `year` es palabra reservada en H2) en `audio_data`, vacías hasta el import, la subida o `POST /admin/tags/rebuild-system`. La unicidad de etiqueta pasa a `(type_id, name_key)`. Índices nuevos: `tags_name_key_idx` y `audio_data_year_idx`. El listado sigue leyendo la biblioteca en memoria; con ~9.000 canciones el filtro no pagina.
 
 - Si renombras una migración **ya aplicada**, hay que reparar `flyway_schema_history` (o resetear la DB local). No renombres en staging/prod sin repair.
 - Seed demo (`data.sql`): solo con profile `local`:
@@ -68,9 +71,9 @@ V3__app_0_3_0_secondary_title_artists_and_tags.sql
 
 Staging/CI no activan ese profile (sin seed).
 
-## API v0.4.0
+## API v0.4.1
 
-Errores JSON: `{ "message": "...", "code": "NOT_FOUND" | "FILE_TOO_LARGE" | ... }`.
+Errores JSON: `{ "message": "...", "code": "NOT_FOUND" | "FILE_TOO_LARGE" | "CONFLICT" | ... }`.
 Detalle: [`docs/openapi.yaml`](./docs/openapi.yaml).
 
 ### Audios
@@ -95,6 +98,8 @@ Campos nuevos en cada canción, además de los de 0.1.0 (`id`, `name`, `extensio
 | `secondaryTitle` | Título secundario (traducción u otro idioma), o `null`. Siempre viene en el JSON |
 | `artist` | Artista, o `null`. Sigue siendo texto: no es el id de `/artists` |
 | `album` | Álbum, o `null` |
+| `genre` | Género leído del fichero, o `null`. También es una etiqueta derivada |
+| `year` | Año leído del fichero, o `null`. También es una etiqueta derivada |
 | `durationSeconds` | Duración en segundos, o `null` si no se pudo leer |
 | `trackNumber` | Número de pista, o `null` |
 | `originalFilename` | Nombre original del archivo |
@@ -115,9 +120,9 @@ La migración `V3` añade `secondary_title` (nullable) y no reescribe las filas 
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/tags` | Catálogo. Cada etiqueta trae `id`, `name`, `audioCount`, `artistCount` y `playlistCount`. Una etiqueta sin usos se queda, con ceros |
+| GET | `/tags` | Catálogo. Cada etiqueta trae `id`, `name`, `audioCount`, `artistCount`, `playlistCount`, `readOnly` y `type` `{id, key, name, system}`. `?type=genre` (también `género` o el nombre visible) filtra. Una etiqueta sin usos se queda, con ceros |
 | GET | `/artists` | Artistas con `id`, `name`, `audioCount` y `tags`. `audioCount` cuenta canciones cuyo `artist` es exactamente `name`. `Ana` y `ana` son dos artistas. No hay `POST`: aparecen con la migración y cuando una canción se sube, se importa o se edita el artista. `q` opcional: subcadena del nombre, sin mayúsculas ni acentos. `tag` repetible: el artista tiene que tener todas. El orden no cambia |
-| PUT | `/audios/{id}/tags` | Sustituye las etiquetas de la canción. Cuerpo `{ "tags": ["Live", "rock"] }`. Crea las que no existan. `[]` las quita de la canción. Responde la canción |
+| PUT | `/audios/{id}/tags` | Sustituye las etiquetas asignables. Un string es tipo `free` (`{ "tags": ["Live", "rock"] }`). Un objeto es `{ "type": "mood", "name": "gym" }` (vale la key o el nombre visible, con o sin acento). `[]` quita las asignables. Las derivadas que ya tenga la canción se quedan. Responde la canción |
 | PUT | `/artists/{id}/tags` | Igual, para un artista. No cambia el nombre ni el texto de las canciones. Responde el artista |
 | PUT | `/playlists/{id}/tags` | Igual, para una playlist. Responde la playlist con `items` y `tags`, y actualiza `updatedAt` |
 | GET | `/audios?tag=Live` | Una sola etiqueta se comporta como en 0.3.0: nombre exacto, sin distinguir mayúsculas (los acentos sí). `?tag=a&tag=b` exige las dos. Se puede combinar con `q` y con el resto de filtros |
@@ -138,6 +143,44 @@ En `GET /audios`, además de `q` y `tag`:
 | `shuffle=true` | Devuelve el resultado ya filtrado, en orden aleatorio. `seed` entero opcional repite la misma mezcla. Sin `shuffle`, el orden por `id` |
 
 `shuffle` distinto de `true` o `false`, o un `seed` que no sea entero cuando `shuffle=true`, responde **400** con código `INVALID_QUERY`. Un `seed` suelto, sin barajar, se ignora.
+
+### Tipos de etiqueta (0.4.1)
+
+Hay tipos de sistema que no se renombran ni se borran (responden **409** `CONFLICT`): `artist` (Artista), `genre` (Género), `album` (Álbum), `year` (Año), `language` (Idioma) y `free` (Libre). El usuario puede crear otros (`mood`, por ejemplo): se pueden renombrar y borrar. La key se calcula al crear y no cambia al renombrar. Borrar un tipo de usuario borra sus etiquetas y los vínculos.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/tag-types` | `id`, `key`, `name`, `system`, `color`, `count`. En `artist`, `count` es el número de artistas. En el resto, el número de etiquetas de ese tipo |
+| POST | `/tag-types` | `{ "name": "Mood", "color": "#112233" }`. 201. Un nombre reservado o repetido es **409** |
+| PATCH | `/tag-types/{id}` | Cambia `name` y/o `color` de un tipo de usuario. La key no cambia. Un tipo de sistema es **409** |
+| DELETE | `/tag-types/{id}` | 204. Borra el tipo y sus etiquetas. Un tipo de sistema es **409** |
+
+`artist` no se guarda como etiqueta: el filtro mira `audios.artist`. `genre`, `album` y `year` son derivadas y `readOnly`. No se asignan ni se quitan a mano (**400** `INVALID_BODY`) y no se borran. `language` y `free` (y los tipos del usuario) sí se asignan a mano. `language` no se autogenera: cada valor (`Español`, `English`, …) se crea al asignarlo.
+
+Al subir o importar se leen género y año del fichero (además del álbum, que ya se leía) y se crean las etiquetas derivadas. `POST /admin/tags/rebuild-system` hace lo mismo con toda la biblioteca, leyendo los ficheros ya guardados. Es idempotente. No toca `title`, `secondaryTitle` ni `artist`. Si el álbum ya tiene texto, lo conserva; si está vacío, lo rellena desde el fichero. Un fichero que no se puede leer cuenta como `failed` y no borra lo que ya había. Respuesta: `{ "processed", "updated", "unchanged", "failed" }`.
+
+`PATCH` de `album` actualiza la etiqueta de álbum. `genre` y `year` del JSON no se editan con `PATCH`: salen del fichero.
+
+En la canción, el artista y la playlist, `tags` sigue siendo la lista de nombres. El tipo y `readOnly` están en `GET /tags`.
+
+### Filtro unificado
+
+`GET /audios` acepta `f` repetible. Cada token es `prefijo:valor` y se combina con AND, con `q`, con `shuffle`/`seed` y con los filtros de 0.4.0 (`title`, `artist`, `tag`, `artistTag`, `playlistTag`), que no cambian.
+
+| Token | Qué casa |
+|-------|----------|
+| `artista:` / `artist:` | `audios.artist`, igualado sin mayúsculas ni acentos. No es subcadena: `ana` no entra en `Anais` |
+| `género:` / `genero:` / `genre:` | Columna `genre` o etiqueta de tipo `genre` |
+| `álbum:` / `album:` | Columna `album` o etiqueta de tipo `album` |
+| `año:` / `ano:` / `year:` | Año exacto (`2010`) o rango inclusivo (`2010-2015`, también `2015-2010`) |
+| `idioma:` / `language:` | Etiqueta de tipo `language` |
+| `playlist:` | La canción está en una playlist con ese nombre |
+| `mood:` o el nombre visible de un tipo de usuario | Etiqueta de ese tipo. Tras renombrar siguen valiendo la key y el nombre nuevo |
+| `#valor` o `valor` sin `:` | Etiqueta de tipo `free` |
+
+El valor no distingue mayúsculas ni acentos. Un prefijo desconocido, un año mal formado o un valor vacío responde **400** `INVALID_QUERY`. Un valor que no existe devuelve lista vacía. Un `f` en blanco se ignora.
+
+`GET /filter/suggest?prefix=&q=` devuelve `[{ "type", "value", "count" }]`. `type` es la key (`artist`, `genre`, `album`, `year`, `language`, `free`, `playlist` o la key del usuario). `count` es cuántas canciones casa ese valor con el filtro. `prefix` vacío es todos los tipos; si no, la key, el nombre visible (con o sin acento) o el inicio de ese nombre. `q` es el inicio del valor, sin mayúsculas ni acentos. Un prefijo que no encaja con ningún tipo devuelve `[]`.
 
 `GET /playlists` acepta `q` (subcadena del nombre, sin mayúsculas ni acentos) y `tag` repetible (la playlist tiene que tener todas). Sigue ordenada por `id` y sin `items`.
 
@@ -187,7 +230,7 @@ La respuesta es un resumen:
 Por línea de comandos, una sola vez al arrancar, y el proceso termina al acabar:
 
 ```bash
-java -jar music-streaming-backend-0.4.0.jar \
+java -jar music-streaming-backend-0.4.1.jar \
   --app.import.path="D:\musica" \
   --spring.main.web-application-type=none
 ```
