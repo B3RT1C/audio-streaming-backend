@@ -20,6 +20,7 @@ import net.b3rt1c.music_streaming_backend.dto.PlaylistItemRequest;
 import net.b3rt1c.music_streaming_backend.dto.PlaylistItemResponse;
 import net.b3rt1c.music_streaming_backend.dto.PlaylistResponse;
 import net.b3rt1c.music_streaming_backend.dto.PlaylistWriteRequest;
+import net.b3rt1c.music_streaming_backend.dto.TagAssignment;
 import net.b3rt1c.music_streaming_backend.error.ApiException;
 import net.b3rt1c.music_streaming_backend.error.ErrorCodes;
 import net.b3rt1c.music_streaming_backend.service.PlaylistService;
@@ -78,6 +79,11 @@ public class PlaylistController {
     @PutMapping("/{id}/items")
     public PlaylistResponse reorder(@PathVariable int id, @RequestBody JsonNode body) {
         return playlistService.reorder(id, audioIds(body));
+    }
+
+    @PutMapping("/{id}/tags")
+    public PlaylistResponse replaceTags(@PathVariable int id, @RequestBody JsonNode body) {
+        return playlistService.replaceTags(id, TagAssignment.parse(body));
     }
 
     static List<Integer> audioIds(JsonNode body) {

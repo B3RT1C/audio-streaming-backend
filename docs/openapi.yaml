@@ -1,11 +1,14 @@
 openapi: 3.0.3
 info:
   title: Audio Streaming API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Shared contract for the personal music library.
     There is no authentication: the service is meant to be reached only through the private network.
-    List responses stay JSON arrays. New metadata fields are added beside the 0.1.0 fields.
+    List responses stay JSON arrays. New fields are added beside the previous ones.
+
+    0.3.0 adds secondaryTitle on tracks, an artist catalog copied from track artist text,
+    and tags on tracks, artists and playlists.
 
 paths:
   /audios:
@@ -18,9 +21,17 @@ paths:
           schema:
             type: string
           description: >
-            Case- and accent-insensitive substring match on title, artist, album,
-            display name and original file name. Omitted or blank returns the full catalog,
-            ordered by id.
+            Case- and accent-insensitive substring match on title, secondaryTitle, artist,
+            album, display name and original file name. Omitted or blank does not filter.
+            Combined with tag, a track must match both. Results stay ordered by id.
+        - in: query
+          name: tag
+          required: false
+          schema:
+            type: string
+          description: >
+            Exact tag name, case-insensitive and accent-sensitive ("jose" does not match "José").
+            Not a substring. Omitted or blank does not filter. An unknown name returns an empty list.
       responses:
         '200':
           description: Track list
@@ -109,8 +120,10 @@ paths:
     patch:
       summary: Edit track metadata
       description: >
-        Send only the fields to change. JSON null clears artist, album, trackNumber and durationSeconds.
-        title and name cannot be cleared. Unknown fields are ignored, so the whole track object can be sent back.
+        Send only the fields to change. JSON null clears secondaryTitle, artist, album, trackNumber and durationSeconds.
+        A blank secondaryTitle is stored as null. title and name cannot be cleared.
+        Unknown fields are ignored, including tags. Tag changes use PUT /audios/{id}/tags.
+        The whole track object can be sent back.
       parameters:
         - in: path
           name: id
@@ -153,6 +166,135 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /audios/{id}/tags:
+    put:
+      summary: Replace the tags of a track
+      description: >
+        Replaces the whole set. Tags that do not exist yet are created.
+        Names are trimmed. Matching ignores case and keeps the stored spelling
+        ("LIVE" matches an existing "Live"). Duplicates in the array collapse to one tag.
+        An empty array clears the track's tags but does not delete the tag records.
+        At most 100 names. The response is the track, including secondaryTitle and tags
+        sorted case-insensitively. This does not change GET /audios/{id}, which still streams audio.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagAssignment'
+            example:
+              tags: ["Live", "rock"]
+      responses:
+        '200':
+          description: Track with the new tag set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Track'
+        '400':
+          description: Missing tags, a non-string entry, an empty name, a name longer than 100 characters, or more than 100 names
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tags:
+    get:
+      summary: List tags and how many subjects use each one
+      description: >
+        Ordered case-insensitively by name. A tag with no remaining links stays in the list
+        with zero counts. audioCount, artistCount and playlistCount are separate.
+      responses:
+        '200':
+          description: Tag catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tag'
+              example:
+                - id: 1
+                  name: Live
+                  audioCount: 4
+                  artistCount: 1
+                  playlistCount: 0
+
+  /artists:
+    get:
+      summary: List artists copied from track artist text
+      description: >
+        One row per exact artist string (case-sensitive). "Ana" and "ana" are different artists.
+        The name matches audio.artist exactly, including spaces.
+        Rows come from the 0.3.0 migration (distinct non-blank audio.artist values)
+        and from later uploads, imports and PATCH artist changes.
+        Clearing a track's artist does not delete the artist row.
+        There is no POST /artists. Ordered case-insensitively by name, then by the exact name.
+        audioCount is the number of tracks whose artist text equals name.
+      responses:
+        '200':
+          description: Artist catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Artist'
+              example:
+                - id: 4
+                  name: José
+                  audioCount: 9
+                  tags: ["Live"]
+
+  /artists/{id}/tags:
+    put:
+      summary: Replace the tags of an artist
+      description: >
+        Same replacement rules as PUT /audios/{id}/tags.
+        Does not change the artist name or any track's artist text.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagAssignment'
+      responses:
+        '200':
+          description: Artist with the new tag set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artist'
+        '400':
+          description: Invalid tag list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Artist not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: Artist not found
+                code: NOT_FOUND
 
   /playlists:
     get:
@@ -235,6 +377,36 @@ paths:
       responses:
         '204':
           description: Playlist deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /playlists/{id}/tags:
+    put:
+      summary: Replace the tags of a playlist
+      description: >
+        Same replacement rules as PUT /audios/{id}/tags.
+        The response includes items and tags. updatedAt changes.
+      parameters:
+        - $ref: '#/components/parameters/PlaylistId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagAssignment'
+      responses:
+        '200':
+          description: Playlist with items and the new tag set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Playlist'
+        '400':
+          description: Invalid tag list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -376,7 +548,7 @@ components:
 
   responses:
     NotFound:
-      description: Track, playlist, or audio file not found
+      description: Track, playlist, artist, or audio file not found
       content:
         application/json:
           schema:
@@ -423,7 +595,7 @@ components:
           type: string
     Track:
       type: object
-      required: [id, path, name, title, extension, createdAt]
+      required: [id, path, name, title, extension, createdAt, secondaryTitle, tags]
       properties:
         id:
           type: integer
@@ -433,9 +605,19 @@ components:
         title:
           type: string
           description: Tag title, or the file name without extension when the tag is missing
+        secondaryTitle:
+          type: string
+          nullable: true
+          description: Alternate title, such as a translation. Always present; null when unset.
         artist:
           type: string
           nullable: true
+          description: Artist text stored on the track. Not an artist id. Null when unset.
+        tags:
+          type: array
+          description: Tag names on this track, sorted case-insensitively. Always present; empty when none.
+          items:
+            type: string
         album:
           type: string
           nullable: true
@@ -476,6 +658,10 @@ components:
           type: string
         title:
           type: string
+        secondaryTitle:
+          type: string
+          nullable: true
+          description: Null or blank clears it. Omitted leaves it unchanged.
         artist:
           type: string
           nullable: true
@@ -498,7 +684,7 @@ components:
           type: string
     Playlist:
       type: object
-      required: [id, name, createdAt, updatedAt, itemCount]
+      required: [id, name, createdAt, updatedAt, itemCount, tags]
       properties:
         id:
           type: integer
@@ -514,9 +700,56 @@ components:
           type: integer
         items:
           type: array
-          description: Present on a single playlist. Omitted from the list.
+          description: Present on a single playlist and on writes. Omitted from GET /playlists. Each item's audio includes secondaryTitle and tags.
           items:
             $ref: '#/components/schemas/PlaylistItem'
+        tags:
+          type: array
+          description: Tag names on this playlist, sorted case-insensitively. Always present, including on the list.
+          items:
+            type: string
+    TagAssignment:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          maxItems: 100
+          description: Full replacement set. Empty clears the subject's tags.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+    Tag:
+      type: object
+      required: [id, name, audioCount, artistCount, playlistCount]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: Stored spelling. A later assignment with different case reuses this spelling.
+        audioCount:
+          type: integer
+        artistCount:
+          type: integer
+        playlistCount:
+          type: integer
+    Artist:
+      type: object
+      required: [id, name, audioCount, tags]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: Exact artist text. Matches audio.artist with the same characters and case.
+        audioCount:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
     PlaylistItem:
       type: object
       required: [position, audioId, audio]

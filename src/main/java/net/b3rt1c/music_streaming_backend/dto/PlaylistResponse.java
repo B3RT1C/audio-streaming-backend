@@ -12,6 +12,7 @@ public record PlaylistResponse(
     Instant createdAt,
     Instant updatedAt,
     int itemCount,
-    List<PlaylistItemResponse> items
+    List<PlaylistItemResponse> items,
+    List<String> tags
 ) {
 }
