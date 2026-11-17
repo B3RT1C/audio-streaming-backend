@@ -5,7 +5,7 @@ API central del ecosistema [audio-streaming](https://github.com/B3RT1C/audio-str
 - Repo: https://github.com/B3RT1C/audio-streaming-backend
 - Stack: Java 25, Spring Boot, PostgreSQL
 - Contrato: [`docs/openapi.yaml`](./docs/openapi.yaml)
-- Versión: **0.4.1**
+- Versión: **0.5.0**
 
 No hay login. El servicio está pensado para usarse solo dentro de la red privada.
 
@@ -37,6 +37,10 @@ API en `http://localhost:8080`.
 | `AUDIO_MAX_REQUEST_SIZE` | `510MB` | Tamaño máximo de la petición. Debe ser al menos `AUDIO_MAX_FILE_SIZE` |
 | `CORS_ALLOWED_ORIGINS` | `*` | Orígenes del navegador, separados por comas. `*` permite cualquiera |
 | `AUDIO_IMPORT_DIR` | vacío | Carpeta base de la importación. Si está vacía, `POST /admin/import` responde `IMPORT_NOT_CONFIGURED` |
+| `STATS_ZONE` | `Europe/Madrid` | Zona de `from`/`to` y de la serie temporal. Las fechas son días inclusivos |
+| `STATS_MIN_COUNTED_SECONDS` | `30` | Segundos a partir de los cuales una escucha cuenta |
+| `STATS_COUNTED_DURATION_RATIO` | `0.5` | Fracción de la duración. El umbral es el menor entre esta fracción y el mínimo de segundos |
+| `STATS_LISTENED_SLACK_SECONDS` | `5` | Tope del tiempo guardado: duración conocida más estos segundos |
 
 Ejemplo para guardar la biblioteca fuera del directorio de trabajo:
 
@@ -56,11 +60,14 @@ V1__app_0_1_0_create_audio_data.sql
 V2__app_0_2_0_library_metadata_and_playlists.sql
 V3__app_0_3_0_secondary_title_artists_and_tags.sql
 V4__app_0_4_1_typed_tags.sql
+V5__app_0_5_0_play_events.sql
 ```
 
 0.4.0 no añade migración. Los filtros de esa versión reutilizan el plegado de texto de `q` (sin `unaccent` ni `pg_trgm`).
 
 `V4` añade `tag_types` y mueve las etiquetas que ya existían al tipo de sistema `free`. No reescribe `title`, `secondary_title`, `artist`, `album` ni `name`. Añade `genre` y `year` (la columna va entre comillas porque `year` es palabra reservada en H2) en `audio_data`, vacías hasta el import, la subida o `POST /admin/tags/rebuild-system`. La unicidad de etiqueta pasa a `(type_id, name_key)`. Índices nuevos: `tags_name_key_idx` y `audio_data_year_idx`. El listado sigue leyendo la biblioteca en memoria; con ~9.000 canciones el filtro no pagina.
+
+`V5` crea `play_events` (escuchas). No reescribe canciones, artistas, etiquetas ni playlists. No añade `user_id`: las estadísticas son de la instancia. En 0.8 se puede añadir esa columna nullable sin reescribir las filas.
 
 - Si renombras una migración **ya aplicada**, hay que reparar `flyway_schema_history` (o resetear la DB local). No renombres en staging/prod sin repair.
 - Seed demo (`data.sql`): solo con profile `local`:
@@ -71,7 +78,7 @@ V4__app_0_4_1_typed_tags.sql
 
 Staging/CI no activan ese profile (sin seed).
 
-## API v0.4.1
+## API v0.5.0
 
 Errores JSON: `{ "message": "...", "code": "NOT_FOUND" | "FILE_TOO_LARGE" | "CONFLICT" | ... }`.
 Detalle: [`docs/openapi.yaml`](./docs/openapi.yaml).
@@ -205,6 +212,80 @@ Las etiquetas de una playlist también salen en cada `audio` de `items`. Borrar 
 
 El reordenado tiene que incluir exactamente las canciones que ya están en la playlist, cada una una vez. `position` empieza en 1. El orden de reproducción es el del array `items`.
 
+### Escucha y estadísticas (0.5.0)
+
+No hay usuarios. Cada cifra es de la instancia. `from` y `to` son fechas `YYYY-MM-DD` inclusivas en `STATS_ZONE` (por defecto Europe/Madrid). Sin un extremo, ese lado es todo el histórico. Una fecha mal formada, `from` posterior a `to`, un `kind` o `granularity` desconocidos, o un `limit` que no sea un entero positivo responden **400** `INVALID_QUERY`. Las listas siguen siendo arrays, sin paginación.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/plays` | Registra una escucha. 201 con el evento. Si `clientEventId` ya existe, 200 con el evento guardado, sin modificarlo |
+| DELETE | `/plays/{id}` | 204. 404 `NOT_FOUND` si no existe |
+| GET | `/stats/summary` | Totales del tramo |
+| GET | `/stats/top` | Ranking |
+| GET | `/stats/timeline` | Serie con los huecos a 0 |
+
+Cuerpo de `POST /plays`:
+
+```json
+{
+  "audioId": 1,
+  "startedAt": "2026-01-15T23:30:00Z",
+  "listenedSeconds": 40,
+  "completed": false,
+  "source": "library",
+  "playlistId": null,
+  "clientEventId": "evt-1"
+}
+```
+
+`audioId` y `listenedSeconds` son obligatorios. `startedAt` vacío significa ahora. `completed` vacío significa false. `source` vacío se guarda null; si viene, es `library`, `search`, `playlist`, `artist`, `shuffle` u `other` (sin distinguir mayúsculas; se guarda en minúsculas). Un audio que no existe, una playlist que no existe, un `source` fuera de esa lista, o `listenedSeconds` ausente o negativo responden **400** `INVALID_BODY`.
+
+Si la canción tiene duración, el tiempo guardado no pasa de `duración + STATS_LISTENED_SLACK_SECONDS` (5 por defecto). `counted` usa ese tiempo ya recortado: es true cuando llega a `min(STATS_MIN_COUNTED_SECONDS, duración × STATS_COUNTED_DURATION_RATIO)`. Con los valores por defecto, 30 segundos, o antes si el 50% de la duración es menor. Si la duración no se conoce, el umbral es solo el mínimo de segundos. La fracción es un número real: con duración 31 el umbral es 15.5, así que hacen falta 16 segundos. Duración 0 cuenta cualquier escucha de 0 o más segundos.
+
+El evento responde siempre con `id`, `audioId`, `startedAt`, `listenedSeconds`, `completed`, `counted`, `source`, `playlistId`, `clientEventId` y `createdAt`. Los nulos van en el JSON.
+
+`clientEventId` vacío o en blanco se guarda null, así que no choca con otro vacío. Se recortan los espacios de los extremos y la comparación es exacta. El reintento devuelve el original e ignora el resto del cuerpo.
+
+`GET /stats/summary` responde:
+
+```json
+{
+  "plays": 3,
+  "listenedSeconds": 140,
+  "distinctAudios": 2,
+  "distinctArtists": 1,
+  "from": "2026-01-01",
+  "to": "2026-01-31"
+}
+```
+
+- `plays`: eventos con `counted` true.
+- `listenedSeconds`: suma de `listenedSeconds` de todos los eventos del tramo, cuenten o no.
+- `distinctAudios`: canciones distintas entre los eventos que cuentan.
+- `distinctArtists`: filas de `artists` cuyo `name` es exactamente el `artist` de la canción, entre los eventos que cuentan. Sin fila, o con artista null, no suma. `Ana` y `ana` son dos artistas.
+- `from` y `to` repiten la petición. null si ese extremo no se envió.
+
+`GET /stats/top?kind=audio|artist|tag|playlist&limit=20&tagType=`
+
+Cada elemento es `{ "id", "name", "secondaryName?", "plays", "listenedSeconds" }`. Orden: `plays` descendente, luego `listenedSeconds` descendente, luego `id` ascendente. Solo entran los que tienen al menos un play contado. `plays` son esos eventos; `listenedSeconds` suma todos los del tramo para ese elemento, también los que no cuentan. `limit` por defecto es 20 y no tiene tope. `kind` no distingue mayúsculas. `tagType` solo se aplica con `kind=tag`; en otro kind se ignora.
+
+| kind | id y name | secondaryName |
+|------|-----------|----------------|
+| `audio` | id y título de la canción | artista de la canción. Se omite si no hay |
+| `artist` | fila de `artists` | se omite. El texto de la canción tiene que coincidir carácter a carácter con `artists.name` |
+| `tag` | id y nombre de la etiqueta, incluidas las derivadas `genre`, `album` y `year` | nombre visible del tipo (`Género`, `Álbum`, `Año`, `Libre`, …) |
+| `playlist` | id y nombre actual de la playlist | se omite. Solo cuentan eventos con `playlist_id` |
+
+`tagType` es la key (`genre`, no `Género`). Una key que no existe devuelve `[]`. Una escucha suma el play entero a cada etiqueta que la canción tiene ahora: una etiqueta asignada después también recibe las escuchas anteriores. Los nombres son los del catálogo actual, no una copia del momento de la escucha.
+
+Borrar una canción borra sus eventos (`ON DELETE CASCADE`). Borrar una playlist deja el evento, pone `playlist_id` a null (`ON DELETE SET NULL`) y ese evento sale del ranking de playlists.
+
+`GET /stats/timeline?granularity=day|month|year`
+
+`[{ "period", "plays", "listenedSeconds" }]`, en orden cronológico. `period` es `YYYY-MM-DD`, `YYYY-MM` o `YYYY` en la zona configurada. `plays` son los contados; `listenedSeconds` suma todos. Los huecos del tramo van a 0. Con `from` y `to`, se rellena el tramo entero aunque no haya datos. Si falta un extremo, el otro lado llega hasta el primer o el último evento; si no hay eventos que anclen ese lado, la lista va vacía. Sin parámetros, del primer evento al último, o `[]` si no hay ninguno. `granularity` no distingue mayúsculas.
+
+Un instante se clasifica por su fecha en Madrid, no en UTC. `2026-01-15T23:30:00Z` cae en `2026-01-16` (en enero Madrid va una hora por delante). `2025-12-31T23:30:00Z` cae en enero de 2026, no en 2025.
+
 ### Importar una carpeta
 
 Copia los audios al almacenamiento. No mueve ni borra los originales. Recorre las subcarpetas, lee etiquetas y no duplica si la ruta original o el hash ya existen. Los ficheros que no son audio se ignoran.
@@ -230,7 +311,7 @@ La respuesta es un resumen:
 Por línea de comandos, una sola vez al arrancar, y el proceso termina al acabar:
 
 ```bash
-java -jar music-streaming-backend-0.4.1.jar \
+java -jar music-streaming-backend-0.5.0.jar \
   --app.import.path="D:\musica" \
   --spring.main.web-application-type=none
 ```

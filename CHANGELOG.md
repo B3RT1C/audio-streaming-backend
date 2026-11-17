@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- `POST /plays` registra una escucha. `listenedSeconds` se recorta a la duración más un margen si la duración se conoce. Cuenta cuando llega al mínimo configurable o, si la canción es más corta, a la fracción de su duración. Un `clientEventId` repetido devuelve el evento ya guardado.
+- `DELETE /plays/{id}` borra un evento erróneo.
+- `GET /stats/summary`, `GET /stats/top` y `GET /stats/timeline` exponen totales, rankings de canciones, artistas, etiquetas y playlists, y la serie por día, mes y año. Las fechas se interpretan en Europe/Madrid. Las estadísticas son de la instancia: no hay `user_id`.
+
 ## 0.4.1
 
 - Tipos de etiqueta. Los de sistema (`artist`, `genre`, `album`, `year`, `language`, `free`) no se renombran ni se borran. El usuario puede crear tipos propios, renombrarlos y borrarlos; al borrarlos se borran sus etiquetas.

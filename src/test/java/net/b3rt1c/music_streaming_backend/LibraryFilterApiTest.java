@@ -71,6 +71,7 @@ class LibraryFilterApiTest {
 
     @BeforeEach
     void reset() {
+        jdbc.update("DELETE FROM play_events");
         jdbc.update("DELETE FROM audio_tags");
         jdbc.update("DELETE FROM artist_tags");
         jdbc.update("DELETE FROM playlist_tags");
