@@ -23,6 +23,10 @@ const REQUIRED_PATHS = [
   '/playlists/{id}/items',
   '/playlists/{id}/items/{audioId}',
   '/admin/import',
+  '/admin/tags/rebuild-system',
+  '/tag-types',
+  '/tag-types/{id}',
+  '/filter/suggest',
 ];
 const REQUIRED_METHODS = {
   '/audios': ['get', 'post'],
@@ -37,6 +41,10 @@ const REQUIRED_METHODS = {
   '/playlists/{id}/items': ['post', 'put'],
   '/playlists/{id}/items/{audioId}': ['delete'],
   '/admin/import': ['post'],
+  '/admin/tags/rebuild-system': ['post'],
+  '/tag-types': ['get', 'post'],
+  '/tag-types/{id}': ['patch', 'delete'],
+  '/filter/suggest': ['get'],
 };
 
 function fail(msg) {
@@ -69,8 +77,8 @@ function extractOpenApiPaths(yaml) {
 
 const yaml = fs.readFileSync(openapiPath, 'utf8');
 if (!yaml.includes('openapi:')) fail('docs/openapi.yaml missing openapi version');
-if (!yaml.includes('version: 0.4.0')) fail('openapi version must be 0.4.0');
-for (const name of ['title', 'artist', 'artistTag', 'playlistTag', 'shuffle', 'seed']) {
+if (!yaml.includes('version: 0.4.1')) fail('openapi version must be 0.4.1');
+for (const name of ['title', 'artist', 'artistTag', 'playlistTag', 'shuffle', 'seed', 'f']) {
   if (!yaml.includes(`name: ${name}`)) fail(`openapi missing query param ${name}`);
 }
 
@@ -90,7 +98,7 @@ if (!audio.includes('@PostMapping')) fail('AudioController missing @PostMapping'
 if (!audio.includes('@PatchMapping("/{id}")')) fail('AudioController missing PATCH /{id}');
 if (!audio.includes('@DeleteMapping("/{id}")')) fail('AudioController missing DELETE /{id}');
 if (!audio.includes('@PutMapping("/{id}/tags")')) fail('AudioController missing PUT /{id}/tags');
-for (const name of ['title', 'artist', 'artistTag', 'playlistTag', 'shuffle', 'seed']) {
+for (const name of ['title', 'artist', 'artistTag', 'playlistTag', 'shuffle', 'seed', 'f']) {
   if (!audio.includes(`"${name}"`)) fail(`AudioController missing query param ${name}`);
 }
 
@@ -126,13 +134,27 @@ const importer = fs.readFileSync(path.join(controllerDir, 'ImportController.java
 if (!importer.includes('@RequestMapping("/admin")')) fail('ImportController must map /admin');
 if (!importer.includes('@PostMapping("/import")')) fail('ImportController missing POST /import');
 
+const rebuild = fs.readFileSync(path.join(controllerDir, 'AdminTagController.java'), 'utf8');
+if (!rebuild.includes('@PostMapping("/tags/rebuild-system")')) {
+  fail('AdminTagController missing POST /tags/rebuild-system');
+}
+
+const tagTypes = fs.readFileSync(path.join(controllerDir, 'TagTypeController.java'), 'utf8');
+if (!tagTypes.includes('@RequestMapping("/tag-types")')) fail('TagTypeController must map /tag-types');
+if (!tagTypes.includes('@PostMapping')) fail('TagTypeController missing POST');
+if (!tagTypes.includes('@PatchMapping("/{id}")')) fail('TagTypeController missing PATCH');
+if (!tagTypes.includes('@DeleteMapping("/{id}")')) fail('TagTypeController missing DELETE');
+
+const filter = fs.readFileSync(path.join(controllerDir, 'FilterController.java'), 'utf8');
+if (!filter.includes('@GetMapping("/suggest")')) fail('FilterController missing GET /suggest');
+
 const cors = fs.readFileSync(
   path.join(root, 'src/main/java/net/b3rt1c/music_streaming_backend/config/CorsConfig.java'),
   'utf8',
 );
 if (cors.includes('192.168.')) fail('CORS still has a hardcoded LAN address');
 
-console.log('CONTRACT OK: openapi v0.4.0 paths match the controllers');
+console.log('CONTRACT OK: openapi v0.4.1 paths match the controllers');
 for (const p of REQUIRED_PATHS) {
   console.log(`  ${p}: ${[...apiPaths[p]].sort().join(', ')}`);
 }

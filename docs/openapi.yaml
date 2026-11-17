@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Audio Streaming API
-  version: 0.4.0
+  version: 0.4.1
   description: |
     Shared contract for the personal music library.
     There is no authentication: the service is meant to be reached only through the private network.
@@ -14,6 +14,12 @@ info:
     0.4.0 adds field filters on tracks, playlists and artists. Filters combine with AND.
     A blank parameter is ignored. A value that matches nothing returns an empty list, not an error.
     GET /audios can also shuffle the filtered list. One tag and q keep the 0.3.0 behaviour.
+
+    0.4.1 adds tag types. System types artist, genre, album, year, language and free cannot be
+    renamed or deleted (409 CONFLICT). User-defined types can. Existing tags become type free.
+    genre, album and year are derived from the track and are read-only. artist is not stored as a
+    tag. language is assigned by hand. GET /audios accepts repeatable f tokens that AND with the
+    0.4.0 filters. GET /filter/suggest autocompletes every type, including artists and playlists.
 
 paths:
   /audios:
@@ -28,7 +34,7 @@ paths:
           description: >
             Case- and accent-insensitive substring match on title, secondaryTitle, artist,
             album, display name and original file name. Omitted or blank does not filter.
-            AND-combined with title, artist, tag, artistTag and playlistTag.
+            AND-combined with title, artist, tag, artistTag, playlistTag and f.
             Without shuffle, results stay ordered by id.
         - in: query
           name: title
@@ -90,6 +96,29 @@ paths:
             Tags split across different playlists do not count. Same tag name rules as tag.
             Blank entries are ignored. Unknown names return an empty list.
         - in: query
+          name: f
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: >
+            Repeat (?f=genre:rock&f=año:2010-2015). Every token is required (AND), together with
+            q, title, artist, tag, artistTag, playlistTag, shuffle and seed.
+            A blank token is ignored. A value that matches nothing returns an empty list.
+            An unknown prefix, an empty value or a year that is not YYYY or YYYY-YYYY is 400 INVALID_QUERY.
+            Prefixes accept the English key and the Spanish name with or without accents:
+            artist/artista, genre/genero/género, album/álbum, year/ano/año, language/idioma, playlist.
+            A user type matches its stable key or its visible name (Mood:gym and mood:gym).
+            Comparison ignores case and accents and is not a substring (artista:ana does not match Anais).
+            year accepts an inclusive range; 2015-2010 is the same as 2010-2015.
+            #value or a value with no colon is a free tag (type free).
+            artist matches audios.artist. playlist matches a playlist name the track belongs to.
+            genre and album match the column or a tag of that type. year matches the column or a year tag.
+            Other prefixes match a tag of that type.
+        - in: query
           name: shuffle
           required: false
           schema:
@@ -118,7 +147,9 @@ paths:
                 items:
                   $ref: '#/components/schemas/Track'
         '400':
-          description: shuffle is not true or false, or seed is not an integer while shuffle=true
+          description: >
+            shuffle is not true or false, seed is not an integer while shuffle=true,
+            or an f token has an unknown prefix, an empty value or a bad year.
           content:
             application/json:
               schema:
@@ -254,14 +285,18 @@ paths:
 
   /audios/{id}/tags:
     put:
-      summary: Replace the tags of a track
+      summary: Replace the assignable tags of a track
       description: >
-        Replaces the whole set. Tags that do not exist yet are created.
+        Replaces assignable tags. A string is a free tag (same body as 0.4.0).
+        An object is { "type": "mood", "name": "gym" }. type may be the stable key or the visible
+        name, with or without accents; omitted type means free. Tags that do not exist yet are created.
         Names are trimmed. Matching ignores case and keeps the stored spelling
-        ("LIVE" matches an existing "Live"). Duplicates in the array collapse to one tag.
-        An empty array clears the track's tags but does not delete the tag records.
-        At most 100 names. The response is the track, including secondaryTitle and tags
-        sorted case-insensitively. This does not change GET /audios/{id}, which still streams audio.
+        ("LIVE" matches an existing "Live"). Duplicates of the same type and name collapse.
+        Derived genre, album and year tags already on the track are kept even when the array
+        omits them or is empty. Assigning those types, or artist, by hand is 400 INVALID_BODY
+        and changes nothing. An empty array clears assignable tags only and does not delete tag records.
+        At most 100 entries. The response is the track. tags stays a list of names.
+        GET /audios/{id} still streams audio.
       parameters:
         - in: path
           name: id
@@ -284,7 +319,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Track'
         '400':
-          description: Missing tags, a non-string entry, an empty name, a name longer than 100 characters, or more than 100 names
+          description: >
+            Missing tags, an entry that is neither a string nor {type, name}, an empty name,
+            a name longer than 100 characters, more than 100 entries, an unknown type,
+            or a manual assignment of a derived type (genre, album, year) or artist.
           content:
             application/json:
               schema:
@@ -296,8 +334,18 @@ paths:
     get:
       summary: List tags and how many subjects use each one
       description: >
-        Ordered case-insensitively by name. A tag with no remaining links stays in the list
-        with zero counts. audioCount, artistCount and playlistCount are separate.
+        Ordered case-insensitively by name, then by type key. A tag with no remaining links stays
+        in the list with zero counts. audioCount, artistCount and playlistCount are separate.
+        type selects one type by key or visible name (genre, género, Libre). Blank returns every tag.
+        artist returns an empty list because artists are not stored as tags. An unknown type returns [].
+        readOnly is true for derived genre, album and year tags.
+      parameters:
+        - in: query
+          name: type
+          required: false
+          schema:
+            type: string
+          description: Type key or visible name. Case- and accent-insensitive. Blank does not filter.
       responses:
         '200':
           description: Tag catalog
@@ -313,6 +361,12 @@ paths:
                   audioCount: 4
                   artistCount: 1
                   playlistCount: 0
+                  readOnly: false
+                  type:
+                    id: 6
+                    key: free
+                    name: Libre
+                    system: true
 
   /artists:
     get:
@@ -368,8 +422,9 @@ paths:
     put:
       summary: Replace the tags of an artist
       description: >
-        Same replacement rules as PUT /audios/{id}/tags.
-        Does not change the artist name or any track's artist text.
+        Same replacement rules as PUT /audios/{id}/tags, including typed objects and preserved derived tags.
+        Does not change the artist name or any track's artist text. Artists do not receive derived tags
+        unless one was already linked; new derived assignments are 400.
       parameters:
         - in: path
           name: id
@@ -516,8 +571,9 @@ paths:
     put:
       summary: Replace the tags of a playlist
       description: >
-        Same replacement rules as PUT /audios/{id}/tags.
-        The response includes items and tags. updatedAt changes.
+        Same replacement rules as PUT /audios/{id}/tags, including typed objects.
+        Derived tags already on the playlist are kept. The response includes items and tags.
+        updatedAt changes.
       parameters:
         - $ref: '#/components/parameters/PlaylistId'
       requestBody:
@@ -658,6 +714,193 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /admin/tags/rebuild-system:
+    post:
+      summary: Rebuild derived genre, album and year tags for the whole library
+      description: >
+        Reads each stored audio file and realigns genre, year and the derived tags.
+        Does not change title, secondaryTitle or artist. An album that already has text is kept;
+        a blank album is filled from the file. Idempotent: a second run with the same files
+        reports those tracks as unchanged. A missing or unreadable file is counted as failed
+        and its stored fields are left as they are. Unused derived tags are removed afterwards.
+        Language, free and user tags are not modified.
+      responses:
+        '200':
+          description: Rebuild summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /tag-types:
+    get:
+      summary: List tag types
+      description: >
+        System types come first, in a fixed order: artist, genre, album, year, language, free.
+        User types follow, ordered by name. count for artist is the number of artist rows.
+        count for every other type is the number of tags of that type. color is null when unset.
+        artist is virtual (resolved against the artist table). genre, album and year are derived
+        and cannot be assigned by hand. language and free can. System types cannot be renamed or deleted.
+      responses:
+        '200':
+          description: Tag types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TagType'
+    post:
+      summary: Create a user tag type
+      description: >
+        key is a stable slug of name (accents folded, case ignored) and does not change later.
+        A name that collides with a system type, a reserved prefix (including playlist) or an
+        existing type is 409 CONFLICT. color is optional, at most 32 characters.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagTypeCreate'
+            example:
+              name: Mood
+              color: "#112233"
+      responses:
+        '201':
+          description: Created type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagType'
+        '400':
+          description: Missing or invalid name, or a color longer than 32 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The name or key is reserved or already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: This name is reserved
+                code: CONFLICT
+
+  /tag-types/{id}:
+    patch:
+      summary: Rename a user tag type or change its color
+      description: >
+        Send only the fields to change. name updates the visible name and leaves key unchanged.
+        JSON null clears color. A system type is 409 CONFLICT, including an empty body.
+        A name reserved or already used by another type is 409.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagTypePatch'
+      responses:
+        '200':
+          description: Updated type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagType'
+        '400':
+          description: Invalid name or color
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Tag type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: System type, or the new name is reserved or already used
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      summary: Delete a user tag type and its tags
+      description: >
+        Removes the type, its tags and every link from tracks, artists and playlists.
+        Does not delete those tracks, artists or playlists. A system type is 409 CONFLICT.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Type deleted
+        '404':
+          description: Tag type not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: System type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+              example:
+                message: System tag types cannot be deleted
+                code: CONFLICT
+
+  /filter/suggest:
+    get:
+      summary: Suggest filter values
+      description: >
+        Autocomplete for the f tokens. Each item is { type, value, count }.
+        type is a stable key: artist, genre, album, year, language, free, playlist, or a user type key.
+        value is one stored spelling. count is how many tracks the matching f token would return.
+        Suggestions with a zero count are omitted.
+        prefix empty returns every type. Otherwise it matches a key, an alias or a visible name
+        (género, ano, libre) exactly, or the start of one of those when nothing matches exactly.
+        An unknown prefix returns an empty list, not an error.
+        q matches the start of the value, ignoring case and accents. Blank q does not filter values.
+      parameters:
+        - in: query
+          name: prefix
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Suggestions ordered by type, then by value
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FilterSuggestion'
+              example:
+                - type: genre
+                  value: Rock
+                  count: 120
+
   /sync/status:
     get:
       summary: Sync status between central and local catalogs
@@ -720,6 +963,7 @@ components:
             - IMPORT_NOT_CONFIGURED
             - PATH_NOT_ALLOWED
             - RANGE_NOT_SATISFIABLE
+            - CONFLICT
     ApiMessage:
       type: object
       required: [message]
@@ -748,12 +992,23 @@ components:
           description: Artist text stored on the track. Not an artist id. Null when unset.
         tags:
           type: array
-          description: Tag names on this track, sorted case-insensitively. Always present; empty when none.
+          description: >
+            Tag names on this track, sorted case-insensitively. Always present; empty when none.
+            Includes derived genre, album and year names. The same name can appear twice when two
+            types share it. Type and readOnly come from GET /tags.
           items:
             type: string
         album:
           type: string
           nullable: true
+        genre:
+          type: string
+          nullable: true
+          description: Genre read from the file. Null when unknown. Also published as a read-only tag.
+        year:
+          type: integer
+          nullable: true
+          description: Year read from the file. Null when unknown. Also published as a read-only tag.
         durationSeconds:
           type: integer
           nullable: true
@@ -801,6 +1056,9 @@ components:
         album:
           type: string
           nullable: true
+          description: >
+            Null clears it and removes the derived album tag. Omitted leaves album and its tag unchanged.
+            genre and year are not editable here.
         trackNumber:
           type: integer
           nullable: true
@@ -848,14 +1106,27 @@ components:
         tags:
           type: array
           maxItems: 100
-          description: Full replacement set. Empty clears the subject's tags.
+          description: >
+            Assignable tags only. A string is a free tag and stays compatible with 0.4.0.
+            An object sets the type. Empty clears assignable tags and keeps derived ones.
           items:
-            type: string
-            minLength: 1
-            maxLength: 100
+            oneOf:
+              - type: string
+                minLength: 1
+                maxLength: 100
+              - type: object
+                required: [name]
+                properties:
+                  type:
+                    type: string
+                    description: Type key or visible name. Omitted means free.
+                  name:
+                    type: string
+                    minLength: 1
+                    maxLength: 100
     Tag:
       type: object
-      required: [id, name, audioCount, artistCount, playlistCount]
+      required: [id, name, audioCount, artistCount, playlistCount, readOnly, type]
       properties:
         id:
           type: integer
@@ -868,6 +1139,87 @@ components:
           type: integer
         playlistCount:
           type: integer
+        readOnly:
+          type: boolean
+          description: True for derived genre, album and year tags. Those cannot be assigned or removed by hand.
+        type:
+          $ref: '#/components/schemas/TagTypeRef'
+    TagTypeRef:
+      type: object
+      required: [id, key, name, system]
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+          description: Stable key. artist, genre, album, year, language, free, or a user slug.
+        name:
+          type: string
+        system:
+          type: boolean
+    TagType:
+      type: object
+      required: [id, key, name, system, color, count]
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        name:
+          type: string
+        system:
+          type: boolean
+        color:
+          type: string
+          nullable: true
+        count:
+          type: integer
+          description: Artist rows for type artist. Tag rows for every other type.
+    TagTypeCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        color:
+          type: string
+          nullable: true
+          maxLength: 32
+    TagTypePatch:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        color:
+          type: string
+          nullable: true
+          maxLength: 32
+    FilterSuggestion:
+      type: object
+      required: [type, value, count]
+      properties:
+        type:
+          type: string
+        value:
+          type: string
+        count:
+          type: integer
+    RebuildResult:
+      type: object
+      required: [processed, updated, unchanged, failed]
+      properties:
+        processed:
+          type: integer
+        updated:
+          type: integer
+          description: Tracks whose genre, year, album or derived tags changed.
+        unchanged:
+          type: integer
+        failed:
+          type: integer
+          description: Stored file missing or unreadable. Those tracks are not modified.
     Artist:
       type: object
       required: [id, name, audioCount, tags]

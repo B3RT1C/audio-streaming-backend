@@ -11,6 +11,9 @@ public interface AudioDataRepository extends JpaRepository<AudioData, Integer> {
     @Query("select a from AudioData a left join fetch a.tags order by a.id asc")
     List<AudioData> findAllWithTags();
 
+    @Query("select a.id from AudioData a order by a.id asc")
+    List<Integer> findIds();
+
     boolean existsByContentHash(String contentHash);
 
     boolean existsByOriginalPath(String originalPath);

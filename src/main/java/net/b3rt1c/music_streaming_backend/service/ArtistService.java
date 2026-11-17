@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import net.b3rt1c.music_streaming_backend.dto.ArtistResponse;
+import net.b3rt1c.music_streaming_backend.dto.TagRequest;
 import net.b3rt1c.music_streaming_backend.error.ApiException;
 import net.b3rt1c.music_streaming_backend.model.Artist;
 import net.b3rt1c.music_streaming_backend.repository.ArtistRepository;
@@ -65,7 +66,7 @@ public class ArtistService {
     }
 
     @Transactional
-    public ArtistResponse replaceTags(int id, List<String> rawNames) {
+    public ArtistResponse replaceTags(int id, List<TagRequest> rawNames) {
         Artist artist = artistRepository.findById(id)
             .orElseThrow(() -> ApiException.notFound("Artist not found"));
         tagService.replace(artist.getTags(), rawNames);

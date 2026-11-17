@@ -5,6 +5,8 @@ public record TagResponse(
     String name,
     int audioCount,
     int artistCount,
-    int playlistCount
+    int playlistCount,
+    boolean readOnly,
+    TagTypeRef type
 ) {
 }

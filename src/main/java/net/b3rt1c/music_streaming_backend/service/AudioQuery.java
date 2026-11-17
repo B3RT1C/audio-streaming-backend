@@ -9,6 +9,7 @@ public record AudioQuery(
     List<String> tags,
     List<String> artistTags,
     List<String> playlistTags,
+    List<String> filters,
     boolean shuffle,
     Long seed
 ) {

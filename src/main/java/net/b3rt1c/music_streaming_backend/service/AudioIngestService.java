@@ -151,6 +151,8 @@ public class AudioIngestService {
         audio.setTitle(title);
         audio.setArtist(metadata.artist());
         audio.setAlbum(metadata.album());
+        audio.setGenre(metadata.genre());
+        audio.setYear(metadata.year());
         audio.setDurationSeconds(metadata.durationSeconds());
         audio.setTrackNumber(metadata.trackNumber());
         audio.setContentHash(hash);

@@ -5,9 +5,11 @@ public record AudioMetadata(
     String artist,
     String album,
     Integer durationSeconds,
-    Integer trackNumber
+    Integer trackNumber,
+    String genre,
+    Integer year
 ) {
     public static AudioMetadata fallback(String title) {
-        return new AudioMetadata(title, null, null, null, null);
+        return new AudioMetadata(title, null, null, null, null, null, null);
     }
 }

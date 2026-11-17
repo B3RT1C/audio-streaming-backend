@@ -86,7 +86,7 @@ public class AudioFileService {
         }
     }
 
-    private Path resolveStoredFile(String directory, String storageKey, String extension) {
+    public Path resolveStoredFile(String directory, String storageKey, String extension) {
         rejectUnsafeKey(storageKey);
         Path folder = Path.of(directory == null ? "" : directory);
         Path file = folder.resolve(storageKey + "." + extension).normalize();

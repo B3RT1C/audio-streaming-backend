@@ -8,11 +8,23 @@ public final class Mp3Fixture {
     }
 
     public static byte[] withTags(String title, String artist, String album, String track) {
+        return withTags(title, artist, album, track, null, null);
+    }
+
+    public static byte[] withTags(
+            String title,
+            String artist,
+            String album,
+            String track,
+            String genre,
+            String year) {
         byte[] body = concat(
             frame("TIT2", title),
             frame("TPE1", artist),
             frame("TALB", album),
-            frame("TRCK", track)
+            frame("TRCK", track),
+            genre == null ? new byte[0] : frame("TCON", genre),
+            year == null ? new byte[0] : frame("TYER", year)
         );
         ByteBuffer file = ByteBuffer.allocate(10 + body.length + 417 * 2);
         file.put(new byte[] {'I', 'D', '3', 3, 0, 0});

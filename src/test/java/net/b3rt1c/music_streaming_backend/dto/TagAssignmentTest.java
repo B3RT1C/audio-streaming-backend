@@ -15,17 +15,30 @@ class TagAssignmentTest {
     private final JsonMapper json = JsonMapper.builder().build();
 
     @Test
-    void readsAListOfStrings() throws Exception {
-        assertEquals(List.of("Live", "rock"), TagAssignment.parse(read("{\"tags\":[\"Live\",\"rock\"]}")));
+    void readsStringsAndTypedObjects() throws Exception {
+        assertEquals(
+            List.of(new TagRequest(null, "Live"), new TagRequest(null, "rock")),
+            TagAssignment.parse(read("{\"tags\":[\"Live\",\"rock\"]}"))
+        );
         assertEquals(List.of(), TagAssignment.parse(read("{\"tags\":[]}")));
+        assertEquals(
+            List.of(new TagRequest(null, "Live"), new TagRequest("mood", "gym")),
+            TagAssignment.parse(read("{\"tags\":[\"Live\",{\"type\":\"mood\",\"name\":\"gym\"}]}"))
+        );
+        assertEquals(
+            List.of(new TagRequest(null, "gym")),
+            TagAssignment.parse(read("{\"tags\":[{\"name\":\"gym\"}]}"))
+        );
     }
 
     @Test
-    void rejectsAnythingThatIsNotAStringList() throws Exception {
+    void rejectsAnythingThatIsNotAStringOrObject() throws Exception {
         assertCode("{}", "INVALID_BODY");
         assertCode("{\"tags\":null}", "INVALID_BODY");
         assertCode("{\"tags\":\"Live\"}", "INVALID_BODY");
         assertCode("{\"tags\":[1]}", "INVALID_BODY");
+        assertCode("{\"tags\":[{\"type\":\"mood\"}]}", "INVALID_BODY");
+        assertCode("{\"tags\":[{\"type\":1,\"name\":\"gym\"}]}", "INVALID_BODY");
         assertCode("[]", "INVALID_BODY");
         assertThrows(ApiException.class, () -> TagAssignment.parse(null));
     }
